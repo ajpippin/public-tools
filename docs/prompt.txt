@@ -1,0 +1,11 @@
+Convert the `model_shelf.sh` to a GoLang tool.
+
+Use SPF13 for a command-line interface.
+
+Use a YAML file stored in ~/.config/ollama/shelves.yaml to define the `shelf` arrays.
+Please use the MacOS- and Windows-specific application support locations.  Allow an environment variable and command-line parameter (--config) to override the location.
+
+Add a hostname to the shelf definition so the same configuration file on multiple machines.  Allow a `--hostname` parameter to override actual hostname.  Default to a short name, not fqdn.  Allow hostname wildcard matching.  If nothing is found on the short hostname, try with fqdn.
+
+Remove the bench-all command.  Allow bench to specify a model or shelf.  If there is a conflict, then report the error and exit.
+Change the final command name to ollama-shelf.
