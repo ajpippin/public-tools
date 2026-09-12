@@ -1,0 +1,313 @@
+use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashSet};
+use std::env;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct Model {
+    pub name: String,
+    pub slot: String,
+    #[serde(default)]
+    pub purpose: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct HostShelf {
+    pub hostname: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ollama_host_url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub models_path: String,
+    pub shelves: BTreeMap<String, Vec<Model>>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct Config {
+    hosts: Vec<HostShelf>,
+}
+
+pub fn configured_path() -> Result<PathBuf> {
+    if let Some(path) = env::var_os("OLLAMA_SHELF_CONFIG").filter(|p| !p.is_empty()) {
+        return Ok(path.into());
+    }
+    let dir = dirs::config_dir().context("cannot determine the OS configuration directory")?;
+    Ok(dir.join("ollama").join("shelves.yaml"))
+}
+
+pub fn initialize(path: &Path, hostname: &str) -> Result<()> {
+    if hostname.trim().is_empty() {
+        bail!("hostname cannot be empty");
+    }
+    let config = initial_config(hostname);
+    let yaml = serde_yaml::to_string(&config).context("encode initial config")?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create config directory {:?}", parent))?;
+    }
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                anyhow::anyhow!("config {:?} already exists", path)
+            } else {
+                anyhow::anyhow!(error).context(format!("create config {:?}", path))
+            }
+        })?;
+    file.write_all(yaml.as_bytes())
+        .with_context(|| format!("write config {:?}", path))?;
+    Ok(())
+}
+
+pub fn load(path: &Path, hostname: &str) -> Result<HostShelf> {
+    let text = fs::read_to_string(path).with_context(|| format!("read config {:?}", path))?;
+    let config: Config =
+        serde_yaml::from_str(&text).with_context(|| format!("parse config {:?}", path))?;
+    if config.hosts.is_empty() {
+        bail!("config has no hosts");
+    }
+    let short = hostname.split('.').next().unwrap_or(hostname);
+    let selected = config
+        .hosts
+        .iter()
+        .find(|host| host.hostname == hostname)
+        .or_else(|| {
+            (short != hostname)
+                .then(|| config.hosts.iter().find(|host| host.hostname == short))
+                .flatten()
+        })
+        .or_else(|| {
+            config
+                .hosts
+                .iter()
+                .rev()
+                .find(|host| host.hostname == "default" || host.hostname == "*")
+        })
+        .cloned()
+        .with_context(|| {
+            format!("no shelf configured for hostname {hostname:?} (and no default shelf)")
+        })?;
+    validate(&selected)?;
+    Ok(with_defaults(selected))
+}
+
+impl HostShelf {
+    pub fn models(&self, name: &str) -> Result<Vec<Model>> {
+        if name == "all" {
+            return Ok(self.all_models());
+        }
+        self.shelves
+            .get(name)
+            .cloned()
+            .with_context(|| format!("shelf {name:?} is not configured"))
+    }
+
+    pub fn all_models(&self) -> Vec<Model> {
+        let mut seen = HashSet::new();
+        self.shelves
+            .values()
+            .flatten()
+            .filter(|model| seen.insert(model.name.clone()))
+            .cloned()
+            .collect()
+    }
+
+    pub fn benchmark_targets(&self, name: &str) -> Result<Vec<String>> {
+        if name == "all" {
+            return Ok(self
+                .all_models()
+                .into_iter()
+                .map(|model| model.name)
+                .collect());
+        }
+        let shelf = self.shelves.get(name);
+        let model_exists = self.all_models().iter().any(|model| model.name == name);
+        if shelf.is_some() && model_exists {
+            bail!(
+                "{name:?} is both a shelf name and a model name; rename one to remove the conflict"
+            );
+        }
+        Ok(match shelf {
+            Some(models) => models.iter().map(|model| model.name.clone()).collect(),
+            None => vec![name.to_owned()],
+        })
+    }
+}
+
+fn validate(shelf: &HostShelf) -> Result<()> {
+    if shelf.shelves.is_empty() {
+        bail!("host has no shelves");
+    }
+    for (name, models) in &shelf.shelves {
+        if name.trim().is_empty() {
+            bail!("shelf names cannot be empty");
+        }
+        if name == "all" {
+            bail!("shelf name \"all\" is reserved for all models in all shelves");
+        }
+        let mut seen = HashSet::new();
+        for model in models {
+            if model.name.trim().is_empty() || model.slot.trim().is_empty() {
+                bail!("every entry in shelf {name:?} must have a name and slot");
+            }
+            if model.name == "all" {
+                bail!(
+                    "model name \"all\" in shelf {name:?} is reserved for all models in all shelves"
+                );
+            }
+            if !seen.insert(&model.name) {
+                bail!(
+                    "model {:?} is listed more than once in shelf {name:?}",
+                    model.name
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn with_defaults(mut shelf: HostShelf) -> HostShelf {
+    if shelf.ollama_host_url.is_empty() {
+        shelf.ollama_host_url = "http://127.0.0.1:11434".into();
+    }
+    if let Some(value) = env::var_os("OLLAMA_HOST_URL").filter(|value| !value.is_empty()) {
+        shelf.ollama_host_url = value.to_string_lossy().into_owned();
+    }
+    if shelf.models_path.is_empty() {
+        shelf.models_path = env::var_os("OLLAMA_MODELS")
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string_lossy().into_owned())
+            .or_else(|| {
+                dirs::home_dir()
+                    .map(|home| home.join(".ollama/models").to_string_lossy().into_owned())
+            })
+            .unwrap_or_default();
+    }
+    shelf
+}
+
+fn initial_config(hostname: &str) -> Config {
+    let model = |name: &str, slot: &str, purpose: &str| Model {
+        name: name.into(),
+        slot: slot.into(),
+        purpose: purpose.into(),
+    };
+    Config {
+        hosts: vec![HostShelf {
+            hostname: hostname.into(),
+            ollama_host_url: "http://127.0.0.1:11434".into(),
+            models_path: String::new(),
+            shelves: BTreeMap::from([
+                (
+                    "core".into(),
+                    vec![
+                        model(
+                            "llama3.2:3b",
+                            "tiny",
+                            "fast chat, routing, and first-pass classification",
+                        ),
+                        model(
+                            "llama3.1:8b",
+                            "workhorse",
+                            "general chat, tool calling, and RAG generation",
+                        ),
+                        model("qwen2.5-coder:7b", "coder", "code generation and FIM"),
+                        model(
+                            "nomic-embed-text",
+                            "embedder",
+                            "embeddings for search and RAG",
+                        ),
+                    ],
+                ),
+                (
+                    "optional".into(),
+                    vec![
+                        model(
+                            "llama3.2:1b",
+                            "tiny",
+                            "autocomplete and ultra-cheap routing",
+                        ),
+                        model(
+                            "qwen2.5-coder:14b",
+                            "coder+",
+                            "harder refactors when speed is not critical",
+                        ),
+                        model("deepseek-r1:8b", "reasoner", "multi-step reasoning"),
+                        model(
+                            "mxbai-embed-large",
+                            "embedder+",
+                            "higher-quality embeddings",
+                        ),
+                    ],
+                ),
+            ]),
+        }],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selects_exact_short_and_fallback_hosts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shelves.yaml");
+        fs::write(
+            &path,
+            r#"hosts:
+  - hostname: default
+    shelves: {core: [{name: fallback, slot: workhorse}]}
+  - hostname: devbox
+    shelves: {core: [{name: short, slot: coder}]}
+  - hostname: devbox.example.com
+    shelves: {core: [{name: exact, slot: coder}]}
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            load(&path, "devbox.example.com").unwrap().shelves["core"][0].name,
+            "exact"
+        );
+        assert_eq!(
+            load(&path, "devbox.other").unwrap().shelves["core"][0].name,
+            "short"
+        );
+        assert_eq!(
+            load(&path, "unknown").unwrap().shelves["core"][0].name,
+            "fallback"
+        );
+    }
+
+    #[test]
+    fn all_targets_are_deduplicated() {
+        let shelf = HostShelf {
+            hostname: "x".into(),
+            ollama_host_url: String::new(),
+            models_path: String::new(),
+            shelves: BTreeMap::from([
+                (
+                    "core".into(),
+                    vec![Model {
+                        name: "shared".into(),
+                        slot: "workhorse".into(),
+                        purpose: String::new(),
+                    }],
+                ),
+                (
+                    "extra".into(),
+                    vec![Model {
+                        name: "shared".into(),
+                        slot: "workhorse".into(),
+                        purpose: String::new(),
+                    }],
+                ),
+            ]),
+        };
+        assert_eq!(shelf.benchmark_targets("all").unwrap(), vec!["shared"]);
+    }
+}

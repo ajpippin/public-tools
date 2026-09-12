@@ -1,0 +1,21 @@
+hosts:
+  - hostname: default
+    ollama_host_url: http://127.0.0.1:11434
+    shelves:
+      core:
+        - name: llama3.2:3b
+          slot: tiny
+          purpose: fast chat, routing, and first-pass classification
+        - name: llama3.1:8b
+          slot: workhorse
+          purpose: general chat, tool calling, and RAG generation
+        - name: qwen2.5-coder:7b
+          slot: coder
+          purpose: code generation and FIM
+        - name: nomic-embed-text
+          slot: embedder
+          purpose: embeddings for search and RAG
+      optional:
+        - name: deepseek-r1:8b
+          slot: reasoner
+          purpose: multi-step reasoning
