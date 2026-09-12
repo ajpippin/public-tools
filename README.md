@@ -1,0 +1,102 @@
+# tools
+
+Small standalone command-line utilities implemented in Rust.
+
+## Included tools
+
+### `ollama-shelf`
+
+Manages host-specific collections of Ollama models. It can list and pull
+curated models, report storage use, remove models outside the configured shelf,
+benchmark models, and select a model for a described task.
+
+### `template`
+
+Creates files from reusable templates. It supports filename- and
+extension-based template selection, substitutions, compound C/C++ targets, and
+safe overwrite or backup handling. The repository includes 27 bundled
+templates.
+
+### `topic`
+
+Browses and maintains a numbered personal topic library. It supports listing,
+searching, sections, configurable command aliases, editing with canonical
+timestamps, Git updates, and optional GPG-encrypted topics.
+
+Each tool has its own README with its complete command and configuration
+reference.
+
+## Build and test
+
+The top-level hidden makefile automatically discovers Rust tools in this
+directory.
+
+```sh
+# Build or test every tool
+make -f .makefile build
+make -f .makefile test
+
+# Operate on one tool
+make -f .makefile build TOOL=topic
+make -f .makefile test TOOL=template
+
+# List discovered tools and makefile usage
+make -f .makefile list
+make -f .makefile help
+```
+
+Release builds use Cargo's standard optimized release profile.
+
+## Install
+
+Install every binary:
+
+```sh
+make -f .makefile install
+```
+
+Install one binary:
+
+```sh
+make -f .makefile install TOOL=ollama-shelf
+```
+
+`BINDIR` defaults to `$HOME/.local/bin` and can be overridden:
+
+```sh
+make -f .makefile install BINDIR=/custom/bin
+```
+
+Installing `template` also installs its bundled templates under
+`$HOME/.local/etc/templates.d`. Existing templates with different contents are
+preserved and reported as warnings; installation continues for other missing
+templates.
+
+## Configuration
+
+The tools keep their YAML configuration files together:
+
+```text
+~/.config/tools/
+├── shelves.yaml
+├── template.yaml
+└── topic.yaml
+```
+
+Each binary automatically creates its missing configuration file with all
+built-in defaults shown as commented-out values. Existing files are never
+rewritten during startup. Each tool also supports its environment-variable and
+`--config` overrides.
+
+## Clean
+
+```sh
+# Remove build artifacts for every tool
+make -f .makefile clean
+
+# Remove build artifacts for one tool
+make -f .makefile clean TOOL=topic
+```
+
+See [COMPLETED.md](COMPLETED.md) for the conversion and setup work already
+completed. [TASKS.md](TASKS.md) records the current outstanding-task status.
