@@ -1,5 +1,5 @@
 CARGO ?= cargo
-BINDIR ?= $(HOME)/.bin/local
+BINDIR ?= $(HOME)/.local/bin
 BINARY := ollama-shelf
 
 .DEFAULT_GOAL := build

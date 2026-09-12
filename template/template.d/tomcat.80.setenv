@@ -1,0 +1,17 @@
+#!/bin/sh
+#
+#  Profile: %profile.name% (8%domain.number%80)
+#
+
+domain=%domain.number%
+
+export JAVA_HOME=/opt/java/home
+export JDK_HOME=${JAVA_HOME}
+#export JAVA_OPTS="${JAVA_OPTS} -Xms192m -Xmx512m -XX:MaxPermSize=256m"
+export CATALINA_OPTS="-Dprofile.name=nflpool -Dlogdir=${CATALINA_BASE}/logs"
+export JPDA_OPTS="-Xdebug -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5%domain.number%05"
+
+export TOMCAT_HOSTNAME=localhost:8%domain.number%80
+export TOMCAT_USERPASS=deployer:%deployer.password%
+export TOMCAT_CONTEXT=/%deployer.contextRoot%
+

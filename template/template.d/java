@@ -1,0 +1,128 @@
+%%fileheader%%
+/*
+ *     description
+ *
+ *      Created by: %%author%% <%%email%%>
+ *      Created on: %%LongDate%%
+ *
+ * @author:    %%author%% <%%email%%>
+ * @requires:   
+ */
+
+//==[ Packages ]================================================================
+
+//package  us.ajpippin;
+
+
+//==[ Class ]===================================================================
+
+public class  %%bAsename%%
+{
+  //~~ Constants ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    /**  Revision control.  */
+    private static final String  srcIdentity = 
+	"%%Identity%%";
+
+
+  //~~ Variables ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  //~~ Constructors ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    //----------------------------------------------------------------------
+    /*
+     *  Default, no-argument, constructor.
+     */
+    public  %%bAsename%%()
+    {
+        Initialize();
+    }
+
+
+    //----------------------------------------------------------------------
+    /*
+     *  Copy constructor.
+     *
+     * @param   %%basename%%  Another instance of class %%bAsename%%.
+     */
+    public  %%bAsename%%( %%bAsename%% %%basename%% )
+    {
+        Initialize();
+    }
+
+
+    //----------------------------------------------------------------------
+    /*
+     *  Initialize all member variables (and whatever else needs to be done).
+     */
+    private void  Initialize()
+    {
+        return;
+    }
+
+
+  //~~ Getters ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    /**  Get the xxx member variable from class %%bAsename%%.  */
+    public Object  get()
+        { return( (Object)null ); }
+
+
+  //~~ Setters ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    /**  Get the xxx member variable from class %%bAsename%%.  */
+    public void  set()
+        { return; }
+
+
+  //~~ Working methods ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    //----------------------------------------------------------------------
+    /*
+     *  Test this class.
+     *
+     * @param   tests  Tests to perform.
+     * @return  Success (<CODE>true</CODE>), or failure (<CODE>false</CODE>).
+     */
+    public static boolean  test( String[] tests )
+    {
+        return( true );
+    }
+
+
+  //~~ Main ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    //----------------------------------------------------------------------
+    /*
+     *  Entry point into this class for testing.
+     *
+     * @param   cmdLine  Command line arguments.
+     */
+    /**/
+    public static void  main( String[] cmdLine )
+    {
+        int  exitCode = 0;
+
+        if( test( cmdLine ) )
+	{
+	    System.err.flush();
+	    System.out.println( "Testing passed." );
+	}
+	else
+	{
+	    System.out.flush();
+	    System.err.println( "ERROR: Testing failed!" );
+	    exitCode = -1;
+	}
+
+	System.out.println();
+	System.out.println( "Say goodnight, Gracie...." );
+
+        System.exit( exitCode );
+    }
+    /**/
+
+
+}
+
+//==============================================================================

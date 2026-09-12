@@ -1,0 +1,63 @@
+<?xml version="1.1" encoding="UTF-8" ?>
+<!-- ======================================================================= -->
+<!--                                                                         -->
+<!--   Ant build file for                                                    -->
+<!--                                                                         -->
+<!-- @author   %%author%% (%%email%%)                            -->
+<!-- @version  %%revision%%  %%date%%		     -->
+<!--                                                                         -->
+<!-- ======================================================================= -->
+
+<project default="compile" basedir=".">
+
+  <property name="project"  value="project"/>
+
+
+  <description>
+    The reason for this build file.
+  </description>
+
+  <!-- Locations of various directories. ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ -->
+
+  <property name="source"   location="Source"/>
+  <property name="build"    location="Build"/>
+  <property name="disti"    location="Distro"/>
+  <property name="include"  location="Include"/>
+
+
+<!-- == Targets ============================================================ -->
+
+  <target name="init">
+    <tstamp/>
+    <mkdir dir="${build}"/>
+  </target>
+
+  <target name="compile" depends="init" description="compile the source" >
+    <javac srcdir="${source}" destdir="${build}">
+      <classpath path="${include}"/>
+    </javac>
+  </target>
+
+  <target name="jar" depends="compile-all" description="create the jar-file" >
+    <mkdir dir="${disti}"/>
+    <jar destfile="${disti}/${project}-${DSTAMP}.jar">
+      <fileset dir="${build}"   excludes="**/makefile **/CVS **/.svn"/>
+      <fileset dir="${include}" excludes="**/makefile **/CVS **/.svn"/>
+      <manifest>
+        <attribute name="Built-By" value="${user.name}"/>
+	<-- attribute name="Main-Class" value="fully.qualified.classname"/ -->
+      </manifest>
+    </jar>
+  </target>
+
+  <target name="clean" description="clean up" >
+    <delete dir="${build}"/>
+  </target>
+
+  <target
+	name="compile-all"
+	depends="clean,compile"
+	description="clean and compile" >
+  </target>
+
+</project>

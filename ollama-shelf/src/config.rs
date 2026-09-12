@@ -24,8 +24,9 @@ pub struct HostShelf {
     pub shelves: BTreeMap<String, Vec<Model>>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 struct Config {
+    #[serde(default)]
     hosts: Vec<HostShelf>,
 }
 
@@ -33,16 +34,15 @@ pub fn configured_path() -> Result<PathBuf> {
     if let Some(path) = env::var_os("OLLAMA_SHELF_CONFIG").filter(|p| !p.is_empty()) {
         return Ok(path.into());
     }
-    let dir = dirs::config_dir().context("cannot determine the OS configuration directory")?;
-    Ok(dir.join("ollama").join("shelves.yaml"))
+    let home = dirs::home_dir().context("cannot determine the home directory")?;
+    Ok(home.join(".config/tools/shelves.yaml"))
 }
 
 pub fn initialize(path: &Path, hostname: &str) -> Result<()> {
     if hostname.trim().is_empty() {
         bail!("hostname cannot be empty");
     }
-    let config = initial_config(hostname);
-    let yaml = serde_yaml::to_string(&config).context("encode initial config")?;
+    let yaml = commented_config(hostname);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("create config directory {:?}", parent))?;
@@ -65,10 +65,16 @@ pub fn initialize(path: &Path, hostname: &str) -> Result<()> {
 
 pub fn load(path: &Path, hostname: &str) -> Result<HostShelf> {
     let text = fs::read_to_string(path).with_context(|| format!("read config {:?}", path))?;
-    let config: Config =
-        serde_yaml::from_str(&text).with_context(|| format!("parse config {:?}", path))?;
+    let config = serde_yaml::from_str::<Option<Config>>(&text)
+        .with_context(|| format!("parse config {:?}", path))?
+        .unwrap_or_default();
     if config.hosts.is_empty() {
-        bail!("config has no hosts");
+        let shelf = initial_config(hostname)
+            .hosts
+            .into_iter()
+            .next()
+            .expect("initial config has one host");
+        return Ok(with_defaults(shelf));
     }
     let short = hostname.split('.').next().unwrap_or(hostname);
     let selected = config
@@ -93,6 +99,51 @@ pub fn load(path: &Path, hostname: &str) -> Result<HostShelf> {
         })?;
     validate(&selected)?;
     Ok(with_defaults(selected))
+}
+
+pub fn ensure(path: &Path, hostname: &str) -> Result<bool> {
+    if path.exists() {
+        return Ok(false);
+    }
+    initialize(path, hostname)?;
+    Ok(true)
+}
+
+fn commented_config(hostname: &str) -> String {
+    format!(
+        "# Ollama shelf configuration. Uncomment and edit values to override defaults.\n\
+# hosts:\n\
+#   - hostname: {hostname}\n\
+#     ollama_host_url: http://127.0.0.1:11434\n\
+#     models_path: ~/.ollama/models\n\
+#     shelves:\n\
+#       core:\n\
+#         - name: llama3.2:3b\n\
+#           slot: tiny\n\
+#           purpose: fast chat, routing, and first-pass classification\n\
+#         - name: llama3.1:8b\n\
+#           slot: workhorse\n\
+#           purpose: general chat, tool calling, and RAG generation\n\
+#         - name: qwen2.5-coder:7b\n\
+#           slot: coder\n\
+#           purpose: code generation and FIM\n\
+#         - name: nomic-embed-text\n\
+#           slot: embedder\n\
+#           purpose: embeddings for search and RAG\n\
+#       optional:\n\
+#         - name: llama3.2:1b\n\
+#           slot: tiny\n\
+#           purpose: autocomplete and ultra-cheap routing\n\
+#         - name: qwen2.5-coder:14b\n\
+#           slot: coder+\n\
+#           purpose: harder refactors when speed is not critical\n\
+#         - name: deepseek-r1:8b\n\
+#           slot: reasoner\n\
+#           purpose: multi-step reasoning\n\
+#         - name: mxbai-embed-large\n\
+#           slot: embedder+\n\
+#           purpose: higher-quality embeddings\n"
+    )
 }
 
 impl HostShelf {

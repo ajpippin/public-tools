@@ -1,0 +1,24 @@
+#= Makefile ====================================================================
+# 
+#  Makefile for 
+# 
+# @author  %%author%% <%%email%%>
+# @date    %%date%%
+# 
+# ==============================================================================
+
+ifndef ROOTDIR
+    ROOTDIR =.
+endif
+
+ifndef BUILD_XML
+    BUILD_XML =build.xml
+endif
+
+
+
+default:
+	@(cd $(ROOTDIR) && ant -f $(BUILD_XML) compile )
+
+%:
+	@(cd $(ROOTDIR) && ant -f $(BUILD_XML) $@ )

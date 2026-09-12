@@ -1,0 +1,26 @@
+@topic xx
+@search
+@platform
+@see
+@url
+@section 01/personal
+
+
+Table of Contents
+
+  * First item
+  * Second item
+
+
+** First Item
+
+blah blah blah
+
+
+** Second Item
+
+blah blah blah
+
+
+---
+Last updated: %ccyy-mm-dd%, by %%author%% <%%email%%>

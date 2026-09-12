@@ -1,0 +1,50 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- The contents of this file will be loaded for each web application -->
+<Context>
+
+    <!-- Default set of monitored resources. If one of these changes, the    -->
+    <!-- web application will be reloaded.                                   -->
+    <WatchedResource>WEB-INF/web.xml</WatchedResource>
+    <WatchedResource>${catalina.base}/conf/web.xml</WatchedResource>
+
+    <Resource
+        name="jdbc/%jdbc.datasource%"
+        auth="Container"
+        type="javax.sql.DataSource"
+        MaxTotal="30"
+        maxIdle="5"
+        maxWaitMillis="10000"
+        removeAbandonedTimeout="60"
+        logAbandoned="true"
+        username="%db.username%"
+        password="%db.password%"
+        driverClassName="com.mysql.jdbc.Driver"
+        url="jdbc:mysql://%db.hostname%:3306/%db.database%?autoReconnect=true&amp;useUnicode=yes&amp;characterEncoding=UTF-8"
+        validationQuery="show variables like 'version'"
+        testOnBorrow="true"
+        testOnReturn="false"
+        testWhileIdle="false"
+      />
+
+<!--
+        maxActive="30"
+        removeAbandoned="true"
+        maxWait="10000"
+-->
+<!--
+  Property maxActive is not used in DBCP2, use maxTotal instead. maxTotal
+  default value is 8. You have set value of "30" for "maxActive" property,
+  which is being ignored.
+
+  Property removeAbandoned is not used in DBCP2, use one or both of
+  removeAbandonedOnBorrow or removeAbandonedOnMaintenance instead. Both have
+  default value set to false. You have set value of "true" for "removeAbandoned"
+  property, which is being ignored.
+
+  Property maxWait is not used in DBCP2 , use maxWaitMillis instead.
+  maxWaitMillis default value is -1. You have set value of "10000" for "maxWait"
+  property, which is being ignored.
+-->
+
+</Context>
+

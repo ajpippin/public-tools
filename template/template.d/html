@@ -1,0 +1,40 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 TRANSITIONAL//EN">
+<HTML>
+<HEAD>
+    <META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+    <META NAME="author"   CONTENT="%%author%%">
+    <META NAME="modified" CONTENT="%%date%%">
+    <TITLE>%%bAsename%%</TITLE>
+</HEAD>
+<BODY BGCOLOR=white>
+
+
+<!-- begin footer -->
+<CENTER>
+  <TABLE WIDTH="100%" >
+    <TR>
+      <TD WIDTH="5%">&nbsp;</TD>
+      <TD WIDTH="30%">
+	<FONT SIZE=-1>
+	  <A CLASS="header" HREF="http://www.cs.ucsb.edu/~pippin/">
+	      http://www.cs.ucsb.edu/~pippin
+	  </A>
+	</FONT>
+      </TD>
+      <TD WIDTH="60%">
+	<DIV ALIGN=right>
+	  <FONT SIZE=-1>
+	      Last modified by
+	      <A class="header" href="mailto:%%email%%">
+		  %%author%%
+	      </A>
+	   </FONT>
+	</DIV>
+      </TD>
+      <TD WIDTH="5%">&nbsp;</TD>
+    </TR>
+  </TABLE>
+</CENTER>
+
+</BODY>
+</HTML>

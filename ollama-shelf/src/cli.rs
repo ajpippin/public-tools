@@ -77,6 +77,9 @@ fn execute(action: Action, path: &Path, hostname: &str) -> Result<()> {
         println!("created {}", path.display());
         return Ok(());
     }
+    if config::ensure(path, hostname)? {
+        eprintln!("created default configuration: {}", path.display());
+    }
     let shelf = config::load(path, hostname)?;
     match action {
         Action::Init => unreachable!(),

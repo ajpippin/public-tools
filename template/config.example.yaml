@@ -1,0 +1,9 @@
+template_dirs:
+  - .
+  - .templates.d
+  - ~/.local/etc/templates.d
+  - /etc/templates
+author_name: Andy Pippin
+author_email: andy@example.com
+substitutions:
+  copyright: Copyright (c)

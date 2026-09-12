@@ -12,17 +12,21 @@ ollama-shelf init
 ```
 
 `install` builds the release binary and copies it to `$BINDIR`. The current
-default is `$HOME/.bin/local`; override it through the environment or on the
+default is `$HOME/.local/bin`; override it through the environment or on the
 command line:
 
 ```sh
 BINDIR=/some/other/bin make -f .makefile install
 ```
 
-The default configuration is `ollama/shelves.yaml` beneath the operating
-system's application-config directory. `OLLAMA_SHELF_CONFIG` overrides that
-path, and `--config` takes precedence over both. `OLLAMA_HOST_URL` and
+The default configuration is `~/.config/tools/shelves.yaml`.
+`OLLAMA_SHELF_CONFIG` overrides that path, and `--config` takes precedence over
+both. `OLLAMA_HOST_URL` and
 `OLLAMA_MODELS` override their corresponding YAML values.
+
+If the file is missing, `ollama-shelf` creates it automatically with every
+available setting shown as a commented-out default. Existing files are never
+rewritten during startup.
 
 ## Commands
 

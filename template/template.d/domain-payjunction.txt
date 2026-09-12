@@ -1,0 +1,4 @@
+s/%%copyright%%/Copyright (c) %%YEAR%%/gI
+s/%%authorFull%%/%%author%% <%%email%%>/g
+s/%%authorName%%/%%author%%/g
+s/%%authorEmail%%/<%%email%%>/g

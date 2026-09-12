@@ -1,0 +1,140 @@
+%%header-dashes%%
+|*									      *|
+|*  description								      *|
+|*									      *|
+|* @author   %%author%% <%%email%%>				      *|
+|*									      *|
+\*============================================================================*/
+
+#ifndef  __%%BASENAME%%_%%EXTENSION%%__
+#define  __%%BASENAME%%_%%EXTENSION%%__
+
+
+//~~[ Includes ]~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#include  <string>
+
+
+//~~[ Typedefs/Structures/Enums ]~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+//~~[ Constants ]~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+//~~[ Variables ]~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+//~~[ Classes ]~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+class %%Basename%%
+{
+  public: //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  //- Member Typedefs/Structures/Enums ---------------------------------------
+
+  //- Member Constants -------------------------------------------------------
+
+  //- Constructors -----------------------------------------------------------
+
+    //----------------------------------------------------------------------
+    /**
+     *  Create an instance with no arguments.
+     */
+    %%Basename%%(
+        void
+    );
+
+
+    //----------------------------------------------------------------------
+    /**
+     *  Create an instance, initialize it, then copy in the current values
+     *  of the member variables.
+     *
+     * @param   %%basename%%  An instance of this class.
+     */
+    %%Basename%%(
+        const %%Basename%%&  %%basename%%
+    );
+
+
+    //----------------------------------------------------------------------
+    /**
+     *  Default destructor.
+     */
+    	    virtual
+    ~%%Basename%%(
+        void
+    );
+
+
+  //- Getters ----------------------------------------------------------------
+
+    /**  Get the xxx member variable of this class.  */
+    virtual void*  getMember( void );
+
+
+  //- Setters ----------------------------------------------------------------
+
+    /**  Set the xxx member variable of this class.  */
+    virtual void  setMember( void* value );
+
+
+    //----------------------------------------------------------------------
+    /**
+     *  Make a string representation out of the instance.
+     *
+     * @param   prefix  Prepend this to each line (NULL --> "").
+     * @param   label   Top-level label (NULL --> %%Basename%%).
+     * @return  XML representation.
+     */
+            virtual char*
+    toString(
+	char*  prefix =NULL,
+	char*  label  =NULL
+    );
+
+
+    //----------------------------------------------------------------------
+    /**
+     *  Test this class.
+     *
+     * @return   Success (true) or failure (false).
+     */
+    static bool  test( void );
+
+
+  protected: //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  private: //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    //- Member variables ---------------------------------------------------
+
+
+    //----------------------------------------------------------------------
+    /**
+     *  Initialize the member variables.
+     */
+    	    virtual void
+    Initialize(
+        void
+    );
+
+};
+
+
+//~~[ Prototypes ]~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+namespace %%basename%%
+{
+    //----------------------------------------------------------------------
+    /**
+     *  description
+     *
+     * @param   arg   description
+     * @param   arg   description
+     * @return  returns
+     */
+
+};
+
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#endif // __%%BASENAME%%_%%EXTENSION%%__

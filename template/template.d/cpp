@@ -1,0 +1,159 @@
+%%header-dashes%%
+|*									      *|
+|*  description 							      *|
+|*									      *|
+|* @author   %%author%% <%%email%%>				      *|
+|*									      *|
+\*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+
+
+//~~[ Identity ]~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#define  __%%BASENAME%%_%%EXTENSION%%__
+
+
+//~~[ Includes ]~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#include "%%bAsename%%.hh"
+
+
+//~~[ Typedefs/Structures/Enums ]~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+//~~[ Constants ]~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+//~~[ Variables ]~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+namespace  global
+{
+    extern int  verboseLevel;
+};
+
+
+//~~[ Classes ]~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+//~~[ Prototypes ]~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+namespace %%basename%%
+{
+    //----------------------------------------------------------------------
+    /*
+     *  description
+     *
+     * @param   arg   description
+     * @param   arg   description
+     * @return  returns
+     */
+
+};
+
+
+//~~[ Implementation ]~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	void
+%%Basename%%::Initialize(
+    void
+){
+    return;
+}
+
+
+//------------------------------------------------------------------------------
+
+%%Basename%%::%%Basename%%(
+    void
+){
+    Initialize();
+    return;
+}
+
+
+//------------------------------------------------------------------------------
+
+%%Basename%%::%%Basename%%(
+    const %%Basename%%&  %%basename%%
+){
+    Initialize();
+    return;
+}
+
+
+//------------------------------------------------------------------------------
+
+%%Basename%%::~%%Basename%%(
+    void
+){
+}
+
+
+//------------------------------------------------------------------------------
+
+	void*
+%%Basename%%::getMember(
+    void
+){
+    return( (void*)NULL );
+}
+
+
+//------------------------------------------------------------------------------
+
+	void
+%%Basename%%::setMember(
+    void*  newValue
+){
+    return;
+}
+
+
+//------------------------------------------------------------------------------
+
+	char*
+%%Basename%%::toString(
+    char*  prefix,
+    char*  label
+){
+    static std::string  result;
+    static char  line[ 256 ];
+
+    // Initialize and fix NULLs.
+    //
+    result.erase();
+    if( NULL == prefix )  prefix = (char* const)"";
+    if( NULL == label  )  label  = (char* const)"%%Basename%%";
+
+    snprintf( line, sizeof(line), "%s<%s>\n", prefix, label );
+    result += line;
+
+
+    snprintf( line, sizeof(line), "%s</%s>\n", prefix, label );
+    result += line;
+
+    return( (char*)result.c_str() );
+}
+
+
+//------------------------------------------------------------------------------
+
+	bool
+%%Basename%%::test(
+    void
+){
+    bool  success =false;
+
+    success = true;
+End%%Basename%%Test:
+
+    if( 0 < global::verboseLevel )
+    {
+	if( success )
+	    printf( "Test was successful!\n" );
+	else
+	    printf( "Test Failed! :(\n" );
+    }
+
+    return( success );
+}
+
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

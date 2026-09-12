@@ -1,0 +1,10 @@
+# The topic library may be elsewhere, including in a synchronized Git checkout.
+topic_dir: ~/.topics
+author_name: Andy Pippin
+author_email: andy@example.com
+gpg_binary: gpg
+gpg_recipients:
+  - andy@example.com
+aliases:
+  q: search
+  p: print

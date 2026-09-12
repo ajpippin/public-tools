@@ -1,0 +1,86 @@
+#= Makefile ====================================================================
+# 
+#   DESC:	Makefile for Top
+# 
+#   AUTHOR:     %%author%%
+# 
+#   MODIFIED:   2003 Aug 28  pippin  Original Version
+# 
+#   VERSION:    $Id: Makefile.html,v 1.1 2003/12/18 07:15:19 pippin Exp $
+# 
+# ==============================================================================
+
+include ${HOME}/.Include/mk.common
+include ${HOME}/.Include/mk.html
+
+default: all
+
+
+#--[ Programs and Flags ]-------------------------------------------------------
+
+Header	=$(HTML_Header)
+Footer	=$(HTML_Footer)
+Titles	=$(HTML_Titles)
+
+
+#--[ Sub-directories ]----------------------------------------------------------
+
+SUBDIRS	=
+
+
+#--[ Targets ]------------------------------------------------------------------
+
+NAMS	=index
+
+OBJS	=$(NAMS:%=%.$(HTML_Ext))
+TSKS	=$(OBJS:%=$(HTML_TargetDir)/%)
+
+
+#--[ Dependancies ]-------------------------------------------------------------
+
+$(OBJS): Makefile $(Header) $(Footer) $(Titles)
+
+
+#--[ Miscellaneous Targets ]----------------------------------------------------
+
+all:  $(OBJS)
+	@for sd in $(SUBDIRS); do (cd $$sd && $(MAKE) -s $@); done
+
+clean:
+	@echo -ne "$(CLEAN_Msg)  ($(HTML_TargetLabel))"
+	@$(RMFORCE) $(OBJS) $(OBJS:%=%.bak) && echo "$(DONE_Msg)"
+	@for sd in $(SUBDIRS); do (cd $$sd && $(MAKE) -s $@); done
+
+depend:
+	@echo -ne "$(DEPEND_Msg)  ($(HTML_TargetLabel))"
+	@echo "$(DONE_Msg) ... nothing to do"
+
+dirs:
+	@echo -ne "$(DIRS_Msg)  ($(HTML_TargetLabel))"
+	@mkdir -p $(HTML_PublicDir)/$(HTML_ThisDir) && echo "$(DONE_Msg)"
+	@for sd in $(SUBDIRS); do (cd $$sd && $(MAKE) -s $@); done
+
+install: $(TSKS)
+	@for sd in $(SUBDIRS); do (cd $$sd && $(MAKE) -s $@); done
+
+force:
+	@touch $(NAMS)
+	@$(MAKE) -s all
+
+mrproper: $(OBJS)
+	@$(RMFORCE) $(TSKS)
+	@$(MAKE) -s install
+	@for sd in $(SUBDIRS); do (cd $$sd && $(MAKE) -s $@); done
+
+tags:
+	@echo -ne "$(TAGS_Msg)  ($(HTML_TargetLabel))"
+	@echo "$(DONE_Msg) ... nothing to do"
+
+test: 
+	@echo -ne "Testing  ($(HTML_TargetLabel))"
+	@echo "$(DONE_Msg) ... nothing to do"
+
+
+.PHONY: all clean depend dirs install force mrproper tags test
+
+#===============================================================================
