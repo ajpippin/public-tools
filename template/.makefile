@@ -18,7 +18,16 @@ install: build install-templates
 
 install-templates:
 	install -d "$(TEMPLATE_DIR)"
-	install -m 0644 template.d/* "$(TEMPLATE_DIR)/"
+	@set -eu; \
+	for source in template.d/*; do \
+		name=$${source##*/}; \
+		target="$(TEMPLATE_DIR)/$$name"; \
+		if test ! -e "$$target"; then \
+			install -m 0644 "$$source" "$$target"; \
+		elif ! cmp -s "$$source" "$$target"; then \
+			echo "warning: keeping modified template $$target" >&2; \
+		fi; \
+	done
 
 test:
 	$(CARGO) test

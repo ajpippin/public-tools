@@ -4,14 +4,14 @@ SELECTED_TOOLS := $(if $(strip $(TOOL)),$(TOOL),$(TOOLS))
 
 .DEFAULT_GOAL := build
 
-.PHONY: all build test clean list help validate
+.PHONY: all build install test clean list help validate
 
 all: build
 
 help:
-	@echo "Usage: make -f .makefile [build|test|clean|list] [TOOL=name]"
+	@echo "Usage: make -f .makefile [build|install|test|clean|list] [TOOL=name]"
 	@echo
-	@echo "Without TOOL, build, test, and clean operate on every discovered Rust tool."
+	@echo "Without TOOL, build, install, test, and clean operate on every discovered Rust tool."
 
 list:
 	@for tool in $(TOOLS); do echo "$$tool"; done
@@ -27,6 +27,13 @@ build: validate
 	for tool in $(SELECTED_TOOLS); do \
 		echo "build  $$tool"; \
 		$(CARGO) build --release --manifest-path "$$tool/Cargo.toml"; \
+	done
+
+install: validate
+	@set -eu; \
+	for tool in $(SELECTED_TOOLS); do \
+		echo "install $$tool"; \
+		$(MAKE) -C "$$tool" -f .makefile install; \
 	done
 
 test: validate

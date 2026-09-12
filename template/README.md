@@ -29,6 +29,10 @@ To install only the bundled templates:
 make -f .makefile install-templates
 ```
 
+Template installation never overwrites an existing file with different
+contents. Modified templates are retained and reported as warnings while all
+other missing templates continue to install.
+
 Configuration defaults to `~/.config/tools/template.yaml`. `TEMPLATE_CONFIG`
 and `--config` override it. Run
 `template init` to create a starter configuration; `TEMPLATE_DIR` remains
