@@ -1,0 +1,64 @@
+# CI: lint, test & coverage on every branch. On main, Trivy and SonarQube
+# analysis follow, gated on the first step passing.
+image: rust:latest
+
+definitions:
+  caches:
+    cargo-registry: /usr/local/cargo/registry
+    cargo-target-ollama-shelf: ollama-shelf/target
+    cargo-target-template: template/target
+    cargo-target-topic: topic/target
+    sonar: /opt/sonar-scanner/.sonar
+    trivy: .trivycache
+  steps:
+    - step: &test-step
+        name: Lint, test & coverage
+        runs-on:
+          - self.hosted
+        caches:
+          - cargo-registry
+          - cargo-target-ollama-shelf
+          - cargo-target-template
+          - cargo-target-topic
+        script:
+          - rustup component add rustfmt clippy llvm-tools-preview
+          - curl -fsSL "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-llvm-cov-$(uname -m)-unknown-linux-gnu.tar.gz" | tar -xz -C "${CARGO_HOME:-$HOME/.cargo}/bin"
+          - make -f .makefile lint
+          # Runs the tests under instrumentation (replaces `make test`) and
+          # writes coverage/<tool>.lcov with repo-relative source paths.
+          - make -f .makefile coverage
+        artifacts:
+          - coverage/*.lcov
+
+pipelines:
+  default:
+    - step: *test-step
+
+  branches:
+    main:
+      - step: *test-step
+
+      - step:
+          name: Trivy Security Scan
+          image: aquasec/trivy:0.74.0
+          runs-on:
+            - self.hosted
+          caches:
+            - trivy
+          script:
+            - trivy fs --cache-dir .trivycache --skip-dirs .git --skip-dirs .trivycache --skip-dirs '**/target' --skip-dirs coverage --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 .
+
+      - step:
+          name: SonarQube Analysis
+          image: sonarsource/sonar-scanner-cli:latest
+          runs-on:
+            - self.hosted
+          caches:
+            - sonar
+          script:
+            - for tool in ollama-shelf template topic; do test -s "coverage/$tool.lcov"; done
+            - >-
+              sonar-scanner
+              -Dsonar.host.url=${SONAR_HOST_URL}
+              -Dsonar.token=${SONAR_TOKEN}
+              -Dsonar.qualitygate.wait=true

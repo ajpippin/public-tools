@@ -32,9 +32,14 @@ The top-level hidden makefile automatically discovers Rust tools in this
 directory.
 
 ```sh
-# Build or test every tool
+# Build, lint, or test every tool
 make -f .makefile build
+make -f .makefile lint      # rustfmt --check and Clippy with warnings denied
 make -f .makefile test
+make -f .makefile check     # lint, then test
+
+# Run tests under cargo-llvm-cov and write coverage/<tool>.lcov
+make -f .makefile coverage
 
 # Operate on one tool
 make -f .makefile build TOOL=topic
@@ -46,6 +51,23 @@ make -f .makefile help
 ```
 
 Release builds use Cargo's standard optimized release profile.
+
+`coverage` requires `cargo-llvm-cov` and the `llvm-tools-preview` rustup
+component.
+
+## Continuous integration
+
+`bitbucket-pipelines.yml` runs on the self-hosted runner:
+
+- **Every branch:** lint, then tests with coverage.
+- **`main`:** additionally runs a Trivy filesystem scan (vulnerabilities,
+  secrets, and misconfigurations; fails on fixable HIGH or CRITICAL findings)
+  and a SonarQube analysis that imports the LCOV coverage and waits for the
+  quality gate.
+
+SonarQube settings are in `sonar-project.properties` (project key
+`PublicTools`). The pipeline needs the `SONAR_HOST_URL` and secured
+`SONAR_TOKEN` repository variables.
 
 ## Install
 

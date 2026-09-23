@@ -43,3 +43,10 @@
 - Committed and pushed the `template` and `topic` Rust ports, unified
   configuration, and top-level build orchestration.
 - Committed and pushed the top-level install target and safe template installer.
+
+## Continuous integration
+
+- Split the top-level makefile into `lint` (rustfmt check and Clippy), `test`,
+  `check`, and `coverage` (per-tool LCOV reports via `cargo-llvm-cov`).
+- Added Bitbucket Pipelines: lint, test and coverage on every branch; Trivy
+  scanning and SonarQube analysis with coverage and quality gate on `main`.
