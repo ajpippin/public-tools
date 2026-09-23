@@ -70,11 +70,10 @@ impl Store {
     }
 
     pub fn list(&self, section: Option<&str>, sections_only: bool) -> Result<Vec<String>> {
-        let prefix = section.map(section_prefix);
         let mut results = Vec::new();
         for path in self.files()? {
             let stem = topic_stem(&path).expect("validated topic");
-            if !list_includes(&stem, prefix, sections_only) {
+            if !list_includes(&stem, section, sections_only) {
                 continue;
             }
             let lines = self.read_lines(&path)?;
@@ -186,14 +185,6 @@ impl Store {
             .lines()
             .map(str::to_owned)
             .collect())
-    }
-}
-
-fn section_prefix(section: &str) -> &str {
-    if matches!(section, "0" | "00") {
-        "0"
-    } else {
-        section
     }
 }
 
@@ -605,18 +596,20 @@ mod tests {
         );
         fs::write(d.path().join("0000.md"), "@topic ~~~ Index\n@topic\n").unwrap();
         fs::write(d.path().join("1000.md"), "@topic Thousands\n").unwrap();
-        // Section "0" and "00" both cover every topic below 1000.
-        for section in ["0", "00"] {
-            assert_eq!(
-                s.list(Some(section), false).unwrap(),
-                [
-                    "0000: ~~~ Index",
-                    "0001: First topic",
-                    "0100: ~~~ First section",
-                    "0101: Markdown topic"
-                ]
-            );
-        }
+        // Sections are plain prefixes: "0" is 0000-0999, "00" is 0000-0099.
+        assert_eq!(
+            s.list(Some("0"), false).unwrap(),
+            [
+                "0000: ~~~ Index",
+                "0001: First topic",
+                "0100: ~~~ First section",
+                "0101: Markdown topic"
+            ]
+        );
+        assert_eq!(
+            s.list(Some("00"), false).unwrap(),
+            ["0000: ~~~ Index", "0001: First topic"]
+        );
     }
 
     #[test]
