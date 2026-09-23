@@ -134,8 +134,8 @@ fn execute_command(command: Command, settings: config::Config) -> Result<()> {
                 .transpose()?
                 .unwrap_or_default();
             let lines = engine.show_substitutions(&template_path, &target);
-            if let Some(ref needle) = substitution {
-                let needle = needle.trim_matches('%').to_lowercase();
+            if let Some(substitution) = substitution {
+                let needle = substitution.trim_matches('%').to_lowercase();
                 let line = lines.into_iter().find(|line| {
                     line.split_whitespace()
                         .next()

@@ -176,11 +176,13 @@ impl Engine {
             ("EXTENSION".into(), extension.to_uppercase()),
             ("BASENAME".into(), lower_basename.to_uppercase()),
         ]);
-        let mut file_header = format!("//~~ {filename} {}", "~".repeat(120));
-        file_header.truncate(80);
+        let file_header: String = format!("//~~ {filename} {}", "~".repeat(120))
+            .chars()
+            .take(80)
+            .collect();
         let mut header_dashes = format!("/*== {filename} {}", "=".repeat(120));
-        if header_dashes.len() > 80 {
-            header_dashes.truncate(78);
+        if header_dashes.chars().count() > 80 {
+            header_dashes = header_dashes.chars().take(78).collect();
             header_dashes.push_str("*\\");
         }
         let utc = self.now.to_utc();
