@@ -50,3 +50,27 @@
   `check`, and `coverage` (per-tool LCOV reports via `cargo-llvm-cov`).
 - Added Bitbucket Pipelines: lint, test and coverage on every branch; Trivy
   scanning and SonarQube analysis with coverage and quality gate on `main`.
+
+## Test coverage
+
+- Expanded the unit and CLI integration tests for all three tools, raising
+  coverage to 98.2% (merged in pull request #1):
+  - `ollama-shelf`: 7 to 41 tests. Covers task routing, byte formatting,
+    configuration loading and host selection, and `pull`, `gc`, `size`, and
+    `bench` end to end with a fake `ollama` on `PATH` and a stub HTTP server.
+  - `template`: 9 to 44 tests. Covers target planning, template lookup,
+    overwrite/backup prompts, rendering and headers, configuration loading,
+    and every subcommand.
+  - `topic`: 9 to 52 tests. Covers topic lookup, listing, search, footers,
+    configuration validation, and every command, including `edit` against a
+    Git checkout with a bare origin, a fake `gpg`, and scripted editors.
+- Isolated the CLI tests from the real `HOME`, so running them no longer creates
+  configuration files under `$HOME/.config/tools`.
+- Fixed bugs found while adding tests:
+  - `template` panicked on long non-ASCII file names in `%%fileheader%%` and
+    `%%header-dashes%%`.
+  - `template show` reported unknown substitutions as `Some("name")`.
+  - `topic` ignored `--config=FILE` when resolving aliases, so it loaded (and
+    could create) the default configuration.
+- Changed `topic list 00` to cover 0000-0099, matching other two-digit
+  sections; `topic list 0` still covers 0000-0999.
