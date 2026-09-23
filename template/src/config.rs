@@ -212,4 +212,89 @@ mod tests {
         assert_eq!(config.author_name, "Test User");
         assert!(!config.template_dirs.is_empty());
     }
+
+    fn write_config(text: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        fs::write(&path, text).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn missing_or_empty_config_uses_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = load(&dir.path().join("missing.yaml")).unwrap();
+        assert_eq!(missing.template_dirs, defaults().template_dirs);
+        let (_dir, path) = write_config("");
+        assert_eq!(load(&path).unwrap().template_dirs, defaults().template_dirs);
+    }
+
+    #[test]
+    fn starter_config_is_all_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        assert!(initialize(&path).unwrap());
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.lines().all(|line| line.starts_with('#')));
+        let uncommented: String = text
+            .lines()
+            .skip(1)
+            .map(|line| format!("{}\n", line.strip_prefix("# ").unwrap()))
+            .collect();
+        fs::write(&path, uncommented).unwrap();
+        let config = load(&path).unwrap();
+        assert_eq!(config.template_dirs.len(), 4);
+        assert_eq!(config.substitutions["copyright"], "Copyright (c)");
+    }
+
+    #[test]
+    fn rejects_empty_template_dirs() {
+        let (_dir, path) = write_config("template_dirs: []\n");
+        assert!(
+            load(&path)
+                .unwrap_err()
+                .to_string()
+                .ends_with("has no template_dirs")
+        );
+    }
+
+    #[test]
+    fn reports_parse_errors() {
+        let (_dir, path) = write_config("template_dirs: [unterminated\n");
+        assert!(
+            load(&path)
+                .unwrap_err()
+                .to_string()
+                .starts_with("parse config")
+        );
+    }
+
+    #[test]
+    fn template_dirs_expand_home_and_deduplicate() {
+        let home = dirs::home_dir().unwrap();
+        let (_dir, path) =
+            write_config("template_dirs:\n  - ~/t\n  - /x\n  - ~/t\n  - ''\n  - '~'\n  - a~\n");
+        assert_eq!(
+            load(&path).unwrap().template_dirs,
+            [home.join("t"), "/x".into(), home.clone(), "a~".into()]
+        );
+    }
+
+    #[test]
+    fn ensure_creates_only_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested/config.yaml");
+        assert!(ensure(&path).unwrap());
+        fs::write(&path, "author_name: Kept\n").unwrap();
+        assert!(!ensure(&path).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "author_name: Kept\n");
+    }
+
+    #[test]
+    fn unique_paths_drops_empty_and_repeated_entries() {
+        assert_eq!(
+            unique_paths(vec!["a".into(), "".into(), "b".into(), "a".into()]),
+            [PathBuf::from("a"), "b".into()]
+        );
+    }
 }

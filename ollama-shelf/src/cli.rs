@@ -391,8 +391,86 @@ mod tests {
     }
 
     #[test]
+    fn routes_unmatched_tasks_to_workhorse() {
+        assert_eq!(route_slot("plan a birthday party"), "workhorse");
+        assert_eq!(route_slot(""), "workhorse");
+    }
+
+    #[test]
+    fn earlier_rules_win() {
+        // "embed" (embedder) is checked before "code" (coder).
+        assert_eq!(route_slot("embed this code"), "embedder");
+        // "debug" (coder) is checked before "reason" (reasoner).
+        assert_eq!(route_slot("reason about how to debug"), "coder");
+    }
+
+    #[test]
     fn formats_bytes() {
+        assert_eq!(human_bytes(0), "0 B");
         assert_eq!(human_bytes(500), "500 B");
+        assert_eq!(human_bytes(1023), "1023 B");
+        assert_eq!(human_bytes(1024), "1.0 KiB");
         assert_eq!(human_bytes(1536), "1.5 KiB");
+        assert_eq!(human_bytes(5 * 1024 * 1024), "5.0 MiB");
+        assert_eq!(human_bytes(3 << 30), "3.0 GiB");
+        assert_eq!(human_bytes(1 << 40), "1.0 TiB");
+        assert_eq!(human_bytes(1 << 50), "1024.0 TiB");
+    }
+
+    #[test]
+    fn measures_nested_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("a"), [0u8; 100]).unwrap();
+        fs::create_dir_all(dir.path().join("sub/deeper")).unwrap();
+        fs::write(dir.path().join("sub/b"), [0u8; 20]).unwrap();
+        fs::write(dir.path().join("sub/deeper/c"), [0u8; 3]).unwrap();
+        assert_eq!(directory_size(dir.path()).unwrap(), 123);
+    }
+
+    #[test]
+    fn missing_directory_is_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = directory_size(&dir.path().join("missing")).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    }
+
+    fn shelf(models: &[(&str, &str)]) -> HostShelf {
+        HostShelf {
+            hostname: "x".into(),
+            ollama_host_url: String::new(),
+            models_path: String::new(),
+            shelves: [(
+                "core".to_owned(),
+                models
+                    .iter()
+                    .map(|(name, slot)| Model {
+                        name: (*name).into(),
+                        slot: (*slot).into(),
+                        purpose: String::new(),
+                    })
+                    .collect(),
+            )]
+            .into(),
+        }
+    }
+
+    #[test]
+    fn which_matches_upgraded_slots() {
+        assert!(which(&shelf(&[("big-coder", "coder+")]), "write a function").is_ok());
+    }
+
+    #[test]
+    fn which_reports_missing_slot() {
+        let error = which(&shelf(&[("tiny", "tiny")]), "prove it").unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "task maps to slot \"reasoner\", but that slot is not configured"
+        );
+    }
+
+    #[test]
+    fn list_rejects_unknown_shelf() {
+        let error = list(&shelf(&[("a", "tiny")]), "nope").unwrap_err();
+        assert_eq!(error.to_string(), "shelf \"nope\" is not configured");
     }
 }

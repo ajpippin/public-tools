@@ -103,11 +103,7 @@ pub fn run() -> Result<()> {
 }
 
 fn resolve_aliases(mut args: Vec<OsString>) -> Result<Vec<OsString>> {
-    let config_index = args.iter().position(|arg| arg == "--config");
-    let path = config_index
-        .and_then(|i| args.get(i + 1))
-        .map(PathBuf::from)
-        .map_or_else(config::default_path, Ok)?;
+    let path = config_argument(&args).map_or_else(config::default_path, Ok)?;
     let initializing = args.iter().any(|argument| argument == "init");
     if !initializing && config::ensure(&path)? {
         eprintln!("created default configuration: {}", path.display());
@@ -136,6 +132,17 @@ fn resolve_aliases(mut args: Vec<OsString>) -> Result<Vec<OsString>> {
         args[index] = target.into();
     }
     Ok(args)
+}
+
+/// The `--config FILE` or `--config=FILE` value, if given.
+fn config_argument(args: &[OsString]) -> Option<PathBuf> {
+    args.iter().enumerate().skip(1).find_map(|(index, arg)| {
+        if arg == "--config" {
+            args.get(index + 1).map(PathBuf::from)
+        } else {
+            arg.to_str()?.strip_prefix("--config=").map(PathBuf::from)
+        }
+    })
 }
 
 fn execute(
@@ -278,4 +285,46 @@ fn write_lines(lines: Vec<String>) -> Result<()> {
         println!("{line}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<OsString> {
+        values.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn finds_config_argument_in_either_form() {
+        assert_eq!(
+            config_argument(&args(&["topic", "--config", "a.yaml", "list"])),
+            Some("a.yaml".into())
+        );
+        assert_eq!(
+            config_argument(&args(&["topic", "--no-pager", "--config=b.yaml", "list"])),
+            Some("b.yaml".into())
+        );
+        assert_eq!(config_argument(&args(&["topic", "list"])), None);
+        assert_eq!(config_argument(&args(&["topic", "--config"])), None);
+    }
+
+    #[test]
+    fn resolves_aliases_after_options() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.yaml");
+        std::fs::write(&config, "aliases: {zz: list}\n").unwrap();
+        let config_flag = format!("--config={}", config.display());
+        for prefix in [
+            vec!["topic", "--config", config.to_str().unwrap()],
+            vec!["topic", &config_flag, "--dir", "zz"],
+            vec!["topic", &config_flag, "--dir=zz", "--no-pager"],
+        ] {
+            let mut input = prefix.clone();
+            input.extend(["zz", "zz"]);
+            let mut expected = prefix;
+            expected.extend(["list", "zz"]);
+            assert_eq!(resolve_aliases(args(&input)).unwrap(), args(&expected));
+        }
+    }
 }
