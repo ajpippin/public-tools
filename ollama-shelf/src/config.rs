@@ -405,4 +405,191 @@ mod tests {
             .contains("more than once")
         );
     }
+
+    fn write_config(text: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shelves.yaml");
+        fs::write(&path, text).unwrap();
+        (dir, path)
+    }
+
+    fn two_shelves() -> HostShelf {
+        let model = |name: &str| Model {
+            name: name.into(),
+            slot: "tiny".into(),
+            purpose: String::new(),
+        };
+        HostShelf {
+            hostname: "x".into(),
+            ollama_host_url: String::new(),
+            models_path: String::new(),
+            shelves: BTreeMap::from([
+                ("core".into(), vec![model("a"), model("b")]),
+                ("extra".into(), vec![model("b"), model("c")]),
+            ]),
+        }
+    }
+
+    #[test]
+    fn starter_comments_match_initial_config() {
+        let uncommented: String = commented_config("devbox")
+            .lines()
+            .skip(1)
+            .map(|line| format!("{}\n", line.strip_prefix("# ").unwrap()))
+            .collect();
+        let parsed: Config = serde_yaml::from_str(&uncommented).unwrap();
+        let expected = initial_config("devbox");
+        assert_eq!(parsed.hosts.len(), 1);
+        assert_eq!(parsed.hosts[0].hostname, "devbox");
+        assert_eq!(
+            parsed.hosts[0].ollama_host_url,
+            expected.hosts[0].ollama_host_url
+        );
+        assert_eq!(parsed.hosts[0].shelves, expected.hosts[0].shelves);
+    }
+
+    #[test]
+    fn empty_or_commented_config_uses_builtin_shelf() {
+        for text in ["", "hosts: []\n", &commented_config("devbox")] {
+            let (_dir, path) = write_config(text);
+            let shelf = load(&path, "devbox").unwrap();
+            assert_eq!(shelf.hostname, "devbox");
+            assert_eq!(
+                shelf.shelves.keys().collect::<Vec<_>>(),
+                ["core", "optional"]
+            );
+        }
+    }
+
+    #[test]
+    fn wildcard_host_is_a_fallback() {
+        let (_dir, path) = write_config(
+            "hosts:\n  - hostname: '*'\n    shelves: {core: [{name: star, slot: tiny}]}\n",
+        );
+        assert_eq!(
+            load(&path, "anything").unwrap().shelves["core"][0].name,
+            "star"
+        );
+    }
+
+    #[test]
+    fn last_fallback_host_wins() {
+        let (_dir, path) = write_config(
+            "hosts:
+  - hostname: default
+    shelves: {core: [{name: first, slot: tiny}]}
+  - hostname: '*'
+    shelves: {core: [{name: last, slot: tiny}]}
+",
+        );
+        assert_eq!(
+            load(&path, "anything").unwrap().shelves["core"][0].name,
+            "last"
+        );
+    }
+
+    #[test]
+    fn unknown_host_without_fallback_fails() {
+        let (_dir, path) = write_config(
+            "hosts:\n  - hostname: devbox\n    shelves: {core: [{name: a, slot: tiny}]}\n",
+        );
+        let error = load(&path, "laptop").unwrap_err().to_string();
+        assert!(error.contains("no shelf configured for hostname \"laptop\""));
+    }
+
+    #[test]
+    fn load_validates_selected_host() {
+        let (_dir, path) = write_config(
+            "hosts:\n  - hostname: devbox\n    shelves: {all: [{name: a, slot: tiny}]}\n",
+        );
+        assert!(
+            load(&path, "devbox")
+                .unwrap_err()
+                .to_string()
+                .contains("reserved")
+        );
+    }
+
+    #[test]
+    fn load_reports_parse_and_read_errors() {
+        let (dir, path) = write_config("hosts: [unterminated\n");
+        assert!(
+            load(&path, "x")
+                .unwrap_err()
+                .to_string()
+                .starts_with("parse config")
+        );
+        let missing = dir.path().join("missing.yaml");
+        assert!(
+            load(&missing, "x")
+                .unwrap_err()
+                .to_string()
+                .starts_with("read config")
+        );
+    }
+
+    #[test]
+    fn explicit_settings_are_kept() {
+        let (_dir, path) = write_config(
+            "hosts:
+  - hostname: devbox
+    models_path: /srv/models
+    shelves: {core: [{name: a, slot: tiny}]}
+",
+        );
+        assert_eq!(load(&path, "devbox").unwrap().models_path, "/srv/models");
+    }
+
+    #[test]
+    fn initialize_rejects_blank_hostname() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shelves.yaml");
+        assert_eq!(
+            initialize(&path, "  ").unwrap_err().to_string(),
+            "hostname cannot be empty"
+        );
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn ensure_creates_only_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested/shelves.yaml");
+        assert!(ensure(&path, "devbox").unwrap());
+        fs::write(&path, "hosts: []\n").unwrap();
+        assert!(!ensure(&path, "devbox").unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "hosts: []\n");
+    }
+
+    #[test]
+    fn models_selects_one_shelf_or_all() {
+        let shelf = two_shelves();
+        let names = |models: Vec<Model>| models.into_iter().map(|m| m.name).collect::<Vec<_>>();
+        assert_eq!(names(shelf.models("extra").unwrap()), ["b", "c"]);
+        assert_eq!(names(shelf.models("all").unwrap()), ["a", "b", "c"]);
+        assert_eq!(
+            shelf.models("nope").unwrap_err().to_string(),
+            "shelf \"nope\" is not configured"
+        );
+    }
+
+    #[test]
+    fn benchmark_targets_resolve_shelves_and_models() {
+        let mut shelf = two_shelves();
+        assert_eq!(shelf.benchmark_targets("core").unwrap(), ["a", "b"]);
+        assert_eq!(shelf.benchmark_targets("a").unwrap(), ["a"]);
+        // Unknown names are passed through as ad-hoc model names.
+        assert_eq!(
+            shelf.benchmark_targets("mistral:7b").unwrap(),
+            ["mistral:7b"]
+        );
+        shelf.shelves.get_mut("extra").unwrap()[0].name = "core".into();
+        assert!(
+            shelf
+                .benchmark_targets("core")
+                .unwrap_err()
+                .to_string()
+                .contains("both a shelf name and a model name")
+        );
+    }
 }
