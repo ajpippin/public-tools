@@ -193,30 +193,38 @@ fn validate(shelf: &HostShelf) -> Result<()> {
     if shelf.shelves.is_empty() {
         bail!("host has no shelves");
     }
-    for (name, models) in &shelf.shelves {
-        if name.trim().is_empty() {
-            bail!("shelf names cannot be empty");
+    shelf
+        .shelves
+        .iter()
+        .try_for_each(|(name, models)| validate_shelf(name, models))
+}
+
+fn validate_shelf(name: &str, models: &[Model]) -> Result<()> {
+    if name.trim().is_empty() {
+        bail!("shelf names cannot be empty");
+    }
+    if name == "all" {
+        bail!("shelf name \"all\" is reserved for all models in all shelves");
+    }
+    let mut seen = HashSet::new();
+    for model in models {
+        validate_model(name, model)?;
+        if !seen.insert(&model.name) {
+            bail!(
+                "model {:?} is listed more than once in shelf {name:?}",
+                model.name
+            );
         }
-        if name == "all" {
-            bail!("shelf name \"all\" is reserved for all models in all shelves");
-        }
-        let mut seen = HashSet::new();
-        for model in models {
-            if model.name.trim().is_empty() || model.slot.trim().is_empty() {
-                bail!("every entry in shelf {name:?} must have a name and slot");
-            }
-            if model.name == "all" {
-                bail!(
-                    "model name \"all\" in shelf {name:?} is reserved for all models in all shelves"
-                );
-            }
-            if !seen.insert(&model.name) {
-                bail!(
-                    "model {:?} is listed more than once in shelf {name:?}",
-                    model.name
-                );
-            }
-        }
+    }
+    Ok(())
+}
+
+fn validate_model(shelf: &str, model: &Model) -> Result<()> {
+    if model.name.trim().is_empty() || model.slot.trim().is_empty() {
+        bail!("every entry in shelf {shelf:?} must have a name and slot");
+    }
+    if model.name == "all" {
+        bail!("model name \"all\" in shelf {shelf:?} is reserved for all models in all shelves");
     }
     Ok(())
 }
@@ -360,5 +368,41 @@ mod tests {
             ]),
         };
         assert_eq!(shelf.benchmark_targets("all").unwrap(), vec!["shared"]);
+    }
+
+    #[test]
+    fn validate_rejects_invalid_shelves() {
+        let model = |name: &str, slot: &str| Model {
+            name: name.into(),
+            slot: slot.into(),
+            purpose: String::new(),
+        };
+        let shelf = |shelves: Vec<(&str, Vec<Model>)>| HostShelf {
+            hostname: "x".into(),
+            ollama_host_url: String::new(),
+            models_path: String::new(),
+            shelves: shelves
+                .into_iter()
+                .map(|(name, models)| (name.into(), models))
+                .collect(),
+        };
+        let error = |host: HostShelf| validate(&host).unwrap_err().to_string();
+
+        assert!(validate(&shelf(vec![("core", vec![model("a", "tiny")])])).is_ok());
+        assert_eq!(error(shelf(vec![])), "host has no shelves");
+        assert_eq!(
+            error(shelf(vec![(" ", vec![])])),
+            "shelf names cannot be empty"
+        );
+        assert!(error(shelf(vec![("all", vec![])])).contains("reserved"));
+        assert!(error(shelf(vec![("core", vec![model("a", "")])])).contains("name and slot"));
+        assert!(error(shelf(vec![("core", vec![model("all", "tiny")])])).contains("reserved"));
+        assert!(
+            error(shelf(vec![(
+                "core",
+                vec![model("a", "tiny"), model("a", "coder")]
+            )]))
+            .contains("more than once")
+        );
     }
 }

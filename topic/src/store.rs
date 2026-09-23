@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use chrono::Local;
-use regex::RegexBuilder;
+use regex::{Regex, RegexBuilder};
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write;
@@ -70,67 +70,40 @@ impl Store {
     }
 
     pub fn list(&self, section: Option<&str>, sections_only: bool) -> Result<Vec<String>> {
+        let prefix = section.map(section_prefix);
         let mut results = Vec::new();
         for path in self.files()? {
             let stem = topic_stem(&path).expect("validated topic");
-            if sections_only && !stem.ends_with("00") {
+            if !list_includes(&stem, prefix, sections_only) {
                 continue;
             }
-            if let Some(section) = section {
-                let prefix = if matches!(section, "0" | "00") {
-                    "0"
-                } else {
-                    section
-                };
-                if !stem.starts_with(prefix) {
-                    continue;
-                }
-            }
-            for line in self.read_lines(&path)? {
-                if !line.contains("@topic") || (sections_only && !line.contains("~~~")) {
-                    continue;
-                }
-                let text = line.replacen("@topic", "", 1);
-                if !text.trim().is_empty() {
-                    results.push(format!("{stem}:{text}"));
-                }
-            }
+            let lines = self.read_lines(&path)?;
+            results.extend(
+                lines
+                    .iter()
+                    .filter_map(|line| list_entry(line, sections_only))
+                    .map(|text| format!("{stem}:{text}")),
+            );
         }
         Ok(results)
     }
 
     pub fn search(&self, terms: &[String], full: bool) -> Result<SearchResults> {
-        let expression = if terms.is_empty() {
-            ".*".into()
-        } else {
-            format!("({})", terms.join("|"))
-        };
-        let regex = RegexBuilder::new(&expression)
-            .case_insensitive(true)
-            .build()
-            .context("invalid search expression")?;
+        let regex = search_regex(terms)?;
         let mut lines = Vec::new();
         let mut files = BTreeSet::new();
         for path in self.files()? {
-            for line in self.read_lines(&path)? {
-                if (!full && !line.contains("@topic") && !line.contains("@search"))
-                    || !regex.is_match(&line)
-                {
-                    continue;
-                }
-                let name = path.file_name().unwrap_or_default().to_string_lossy();
-                if full {
-                    if !line.trim().is_empty() {
-                        lines.push(format!("{name}: {line}"));
-                        files.insert(path.clone());
-                    }
-                } else {
-                    let text = line.replacen("@topic", "", 1).replacen("@search", "", 1);
-                    if !text.trim().is_empty() {
-                        lines.push(format!("{}:{text}", topic_stem(&path).unwrap()));
-                        files.insert(path.clone());
-                    }
-                }
+            let label = search_label(&path, full);
+            let before = lines.len();
+            lines.extend(
+                self.read_lines(&path)?
+                    .iter()
+                    .filter(|line| regex.is_match(line))
+                    .filter_map(|line| search_entry(line, full))
+                    .map(|text| format!("{label}{text}")),
+            );
+            if lines.len() > before {
+                files.insert(path);
             }
         }
         lines.sort();
@@ -214,6 +187,63 @@ impl Store {
             .map(str::to_owned)
             .collect())
     }
+}
+
+fn section_prefix(section: &str) -> &str {
+    if matches!(section, "0" | "00") {
+        "0"
+    } else {
+        section
+    }
+}
+
+fn list_includes(stem: &str, prefix: Option<&str>, sections_only: bool) -> bool {
+    (!sections_only || stem.ends_with("00")) && prefix.is_none_or(|prefix| stem.starts_with(prefix))
+}
+
+fn list_entry(line: &str, sections_only: bool) -> Option<String> {
+    if !line.contains("@topic") || (sections_only && !line.contains("~~~")) {
+        return None;
+    }
+    non_blank(line.replacen("@topic", "", 1))
+}
+
+fn search_regex(terms: &[String]) -> Result<Regex> {
+    let expression = if terms.is_empty() {
+        ".*".into()
+    } else {
+        format!("({})", terms.join("|"))
+    };
+    RegexBuilder::new(&expression)
+        .case_insensitive(true)
+        .build()
+        .context("invalid search expression")
+}
+
+/// Full searches label lines by file name; metadata searches by topic number.
+fn search_label(path: &Path, full: bool) -> String {
+    if full {
+        format!(
+            "{}: ",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        )
+    } else {
+        format!("{}:", topic_stem(path).expect("validated topic"))
+    }
+}
+
+fn search_entry(line: &str, full: bool) -> Option<String> {
+    if full {
+        non_blank(line.to_owned())
+    } else if line.contains("@topic") || line.contains("@search") {
+        non_blank(line.replacen("@topic", "", 1).replacen("@search", "", 1))
+    } else {
+        None
+    }
+}
+
+fn non_blank(text: String) -> Option<String> {
+    (!text.trim().is_empty()).then_some(text)
 }
 
 pub fn topic_stem(path: &Path) -> Option<String> {
@@ -366,6 +396,14 @@ mod tests {
         assert_eq!(s.list(None, true).unwrap(), ["0100: ~~~ First section"]);
     }
     #[test]
+    fn lists_by_section() {
+        let (_d, s) = fixture();
+        assert_eq!(
+            s.list(Some("01"), false).unwrap(),
+            ["0100: ~~~ First section", "0101: Markdown topic"]
+        );
+    }
+    #[test]
     fn searches_metadata_and_content() {
         let (_d, s) = fixture();
         assert_eq!(
@@ -375,6 +413,15 @@ mod tests {
         assert_eq!(
             s.search(&["needle".into()], true).unwrap().lines,
             ["0001.txt: Body needle"]
+        );
+        let all = s.search(&[], false).unwrap();
+        assert_eq!(all.lines.len(), 5);
+        assert_eq!(all.files.len(), 3);
+        assert!(
+            s.search(&["nomatch".into()], true)
+                .unwrap()
+                .files
+                .is_empty()
         );
     }
     #[test]
