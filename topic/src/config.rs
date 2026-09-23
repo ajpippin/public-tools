@@ -224,4 +224,90 @@ mod tests {
         assert_eq!(config.topic_dir, PathBuf::from("/tmp/my-topics"));
         assert_eq!(config.gpg_binary, "/opt/gpg/bin/gpg");
     }
+
+    fn write_config(text: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        fs::write(&path, text).unwrap();
+        (dir, path)
+    }
+
+    fn load_error(text: &str) -> String {
+        let (_dir, path) = write_config(text);
+        load(&path).unwrap_err().to_string()
+    }
+
+    #[test]
+    fn missing_or_empty_config_uses_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = load(&dir.path().join("missing.yaml")).unwrap();
+        assert!(config.topic_dir.ends_with(".topics"));
+        assert_eq!(config.gpg_binary, "gpg");
+        assert_eq!(config.aliases, default_aliases());
+        let (_dir, path) = write_config("");
+        assert_eq!(load(&path).unwrap().aliases, default_aliases());
+    }
+
+    #[test]
+    fn configured_aliases_replace_defaults() {
+        let (_dir, path) = write_config("aliases:\n  s: sections\n  list: list\n");
+        assert_eq!(
+            load(&path).unwrap().aliases,
+            BTreeMap::from([
+                ("list".into(), "list".into()),
+                ("s".into(), "sections".into())
+            ])
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_aliases() {
+        assert!(load_error("aliases:\n  'a b': list\n").contains("invalid alias \"a b\""));
+        assert!(load_error("aliases:\n  ' ': list\n").contains("invalid alias"));
+        assert!(
+            load_error("aliases:\n  x: delete\n")
+                .contains("maps alias \"x\" to unknown command \"delete\"")
+        );
+        assert!(
+            load_error("aliases:\n  list: print\n")
+                .contains("uses command name \"list\" as an alias")
+        );
+    }
+
+    #[test]
+    fn rejects_empty_settings() {
+        assert!(load_error("topic_dir: ''\n").ends_with("has an empty topic_dir"));
+        assert!(load_error("gpg_binary: ' '\n").ends_with("has an empty gpg_binary"));
+        assert!(load_error("topic_dir: [unterminated\n").starts_with("parse config"));
+    }
+
+    #[test]
+    fn expands_home() {
+        let home = dirs::home_dir().unwrap();
+        assert_eq!(expand_home("~".into()).unwrap(), home);
+        assert_eq!(expand_home("~/t".into()).unwrap(), home.join("t"));
+        assert_eq!(expand_home("/a/~".into()).unwrap(), PathBuf::from("/a/~"));
+        assert_eq!(expand_home("~user".into()).unwrap(), PathBuf::from("~user"));
+        let (_dir, path) = write_config("topic_dir: ~/notes\n");
+        assert_eq!(load(&path).unwrap().topic_dir, home.join("notes"));
+    }
+
+    #[test]
+    fn starter_config_is_all_comments_and_loads_when_uncommented() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        assert!(ensure(&path).unwrap());
+        assert!(!ensure(&path).unwrap());
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.lines().all(|line| line.starts_with('#')));
+        let uncommented: String = text
+            .lines()
+            .skip(1)
+            .map(|line| format!("{}\n", line.strip_prefix("# ").unwrap()))
+            .collect();
+        fs::write(&path, uncommented).unwrap();
+        let config = load(&path).unwrap();
+        assert_eq!(config.aliases, default_aliases());
+        assert_eq!(config.gpg_recipients.len(), 1);
+    }
 }
