@@ -477,4 +477,288 @@ mod tests {
             .unwrap();
         assert_eq!(fs::read_to_string(target).unwrap(), "exact");
     }
+
+    /// A temp directory with a `templates` subdirectory holding the given
+    /// files, and an engine configured to use it.
+    fn fixture(templates: &[(&str, &str)]) -> (tempfile::TempDir, Engine) {
+        let dir = tempfile::tempdir().unwrap();
+        let template_dir = dir.path().join("templates");
+        fs::create_dir(&template_dir).unwrap();
+        for (name, content) in templates {
+            fs::write(template_dir.join(name), content).unwrap();
+        }
+        let engine = engine(Config {
+            template_dirs: vec![template_dir],
+            ..Config::default()
+        });
+        (dir, engine)
+    }
+
+    fn create_with(
+        engine: &Engine,
+        target: &Path,
+        options: &CreateOptions,
+        answer: &str,
+    ) -> (Result<()>, String) {
+        let mut output = Vec::new();
+        let result = engine.create(
+            target,
+            options,
+            &mut Cursor::new(answer.as_bytes().to_vec()),
+            &mut output,
+        );
+        (result, String::from_utf8(output).unwrap())
+    }
+
+    #[test]
+    fn plans_simple_targets() {
+        let plan = |target: &str, explicit| target_plans(Path::new(target), explicit).unwrap();
+        assert_eq!(
+            plan("Makefile", None),
+            [("Makefile".into(), "Makefile".into())]
+        );
+        assert_eq!(
+            plan("src/main.rs", None),
+            [("src/main.rs".into(), "rs".into())]
+        );
+        assert_eq!(
+            plan("notes.txt", Some("md")),
+            [("notes.txt".into(), "md".into())]
+        );
+        assert_eq!(
+            plan("src/pair.ch", None),
+            [
+                (PathBuf::from("src/pair.c"), "c".into()),
+                (PathBuf::from("src/pair.h"), "h".into())
+            ]
+        );
+        assert!(target_plans(Path::new(".."), None).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_template_names() {
+        let (_dir, engine) = fixture(&[("go", "")]);
+        for name in ["", "..", "../go", "sub/go", "/go"] {
+            assert_eq!(
+                engine.find_template(name).unwrap_err().to_string(),
+                format!("invalid template name {name:?}")
+            );
+        }
+        assert_eq!(
+            engine.find_template("rs").unwrap_err().to_string(),
+            "template \"rs\" was not found"
+        );
+    }
+
+    #[test]
+    fn listing_skips_directories_and_missing_paths() {
+        let (dir, mut engine) = fixture(&[("sh", "")]);
+        fs::create_dir(dir.path().join("templates/nested")).unwrap();
+        engine
+            .config
+            .template_dirs
+            .insert(0, dir.path().join("missing"));
+        let names: Vec<_> = engine
+            .templates()
+            .unwrap()
+            .into_iter()
+            .map(|item| item.name)
+            .collect();
+        assert_eq!(names, ["sh"]);
+    }
+
+    #[test]
+    fn creates_compound_targets_and_parent_directories() {
+        let (dir, engine) = fixture(&[("c", "source %%filename%%"), ("h", "header %%BASENAME%%")]);
+        let target = dir.path().join("out/deep/pair.ch");
+        let (result, output) = create_with(&engine, &target, &CreateOptions::default(), "");
+        result.unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.path().join("out/deep/pair.c")).unwrap(),
+            "source pair.c"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("out/deep/pair.h")).unwrap(),
+            "header PAIR"
+        );
+        assert_eq!(output.matches("Created ").count(), 2);
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn explicit_template_overrides_extension() {
+        let (dir, engine) = fixture(&[("txt", "text"), ("md", "markdown")]);
+        let target = dir.path().join("notes.txt");
+        let options = CreateOptions {
+            template: Some("md".into()),
+            ..CreateOptions::default()
+        };
+        create_with(&engine, &target, &options, "").0.unwrap();
+        assert_eq!(fs::read_to_string(target).unwrap(), "markdown");
+    }
+
+    #[test]
+    fn missing_template_names_the_target() {
+        let (dir, engine) = fixture(&[]);
+        let target = dir.path().join("x.zzz");
+        let error = create_with(&engine, &target, &CreateOptions::default(), "")
+            .0
+            .unwrap_err();
+        assert_eq!(error.to_string(), format!("create {target:?}"));
+        assert_eq!(
+            error.root_cause().to_string(),
+            "template \"zzz\" was not found"
+        );
+    }
+
+    #[test]
+    fn existing_target_prompt_answers() {
+        let (dir, engine) = fixture(&[("txt", "new")]);
+        let target = dir.path().join("a.txt");
+        let backup = dir.path().join("a.txt~");
+        let options = CreateOptions::default();
+
+        for abort in ["\n", "a\n", "nonsense\n", ""] {
+            fs::write(&target, "old").unwrap();
+            let (result, output) = create_with(&engine, &target, &options, abort);
+            result.unwrap();
+            assert!(output.ends_with("exists. Abort, overwrite, or back up [A/o/b]? "));
+            assert_eq!(fs::read_to_string(&target).unwrap(), "old");
+        }
+        assert!(!backup.exists());
+
+        for overwrite in ["o\n", "Overwrite\n"] {
+            fs::write(&target, "old").unwrap();
+            create_with(&engine, &target, &options, overwrite)
+                .0
+                .unwrap();
+            assert_eq!(fs::read_to_string(&target).unwrap(), "new");
+        }
+        assert!(!backup.exists());
+
+        for back_up in ["b\n", "backup\n", "m\n", "MOVE\n"] {
+            fs::write(&target, back_up).unwrap();
+            create_with(&engine, &target, &options, back_up).0.unwrap();
+            assert_eq!(fs::read_to_string(&target).unwrap(), "new");
+            // Each backup replaces the previous one.
+            assert_eq!(fs::read_to_string(&backup).unwrap(), back_up);
+        }
+    }
+
+    #[test]
+    fn force_overwrites_without_prompting() {
+        let (dir, engine) = fixture(&[("txt", "new")]);
+        let target = dir.path().join("a.txt");
+        fs::write(&target, "old").unwrap();
+        let options = CreateOptions {
+            force: true,
+            ..CreateOptions::default()
+        };
+        let (result, output) = create_with(&engine, &target, &options, "");
+        result.unwrap();
+        assert!(!output.contains("exists"));
+        assert_eq!(fs::read_to_string(&target).unwrap(), "new");
+        assert!(!dir.path().join("a.txt~").exists());
+    }
+
+    #[test]
+    fn renders_dates_and_identity() {
+        let engine = engine(Config::default());
+        let rendered = engine.render(
+            "%%shortdate%% %%date%% %%yymmdd%% %%CCYYMMDD%% %%yy-mm-dd%% %%ccyy-mm-dd%% \
+             %%iso8601date%% %%time%% %%year%% %%identity%% %%template%% %%templatepath%% \
+             %%extension%% %%EXTENSION%% %%FILENAME%%",
+            Path::new("/templates/go"),
+            Path::new("dir/Main.Go"),
+        );
+        assert_eq!(
+            rendered,
+            "09/08/26 Sep 08, 2026 260908 20260908 26-09-08 2026-09-08 \
+             20260908T140302 14:03:02 2026 $Id: Main.Go $ go /templates/go \
+             go GO MAIN.GO"
+        );
+    }
+
+    #[test]
+    fn renders_builtin_defaults_and_overrides_case_insensitively() {
+        let mut config = Config {
+            author_email: "a@example.com".into(),
+            ..Config::default()
+        };
+        let engine_defaults = engine(config.clone());
+        assert_eq!(
+            engine_defaults.render(
+                "%%revision%%|%%COPYRIGHT%%|%%authorEmail%%",
+                Path::new("t"),
+                Path::new("x")
+            ),
+            "1.0|Copyright (c)|<a@example.com>"
+        );
+        config
+            .substitutions
+            .insert("Project".into(), "Shelf".into());
+        config
+            .substitutions
+            .insert("copyright".into(), "(C) Me".into());
+        assert_eq!(
+            engine(config).render(
+                "%%project%%|%%PROJECT%%|%%Copyright%%",
+                Path::new("t"),
+                Path::new("x")
+            ),
+            "Shelf|Shelf|(C) Me"
+        );
+    }
+
+    #[test]
+    fn leaves_malformed_tags_alone() {
+        let rendered = engine(Config::default()).render(
+            "%%%% %%file\nname%% %%filename %%filename%%",
+            Path::new("t"),
+            Path::new("a.txt"),
+        );
+        assert_eq!(rendered, "%%%% %%file\nname%% %%filename a.txt");
+    }
+
+    #[test]
+    fn headers_are_eighty_columns() {
+        let engine = engine(Config::default());
+        // The non-ASCII names put a multi-byte character across the cut point.
+        let names = [
+            "a.c".to_owned(),
+            "n".repeat(100),
+            format!("{}é.txt", "a".repeat(72)),
+            format!("{}é.txt", "a".repeat(74)),
+        ];
+        for name in &names {
+            let prefix: String = name.chars().take(3).collect();
+            let header = engine.render("%%fileheader%%", Path::new("t"), Path::new(name));
+            assert_eq!(header.chars().count(), 80);
+            assert!(header.starts_with(&format!("//~~ {prefix}")));
+            let dashes = engine.render("%%header-dashes%%", Path::new("t"), Path::new(name));
+            assert_eq!(dashes.chars().count(), 80);
+            assert!(dashes.starts_with("/*== "));
+            assert!(dashes.ends_with("*\\"));
+        }
+    }
+
+    #[test]
+    fn show_substitutions_is_sorted_and_includes_custom_values() {
+        let mut config = Config::default();
+        config.substitutions.insert("Zeta".into(), "last".into());
+        let lines = engine(config).show_substitutions(Path::new("/t/go"), Path::new("x.go"));
+        let mut sorted = lines.clone();
+        sorted.sort();
+        assert_eq!(lines, sorted);
+        assert!(lines.contains(&format!("{:<22} -> last", "%%zeta%%")));
+        assert!(lines.contains(&format!("{:<22} -> go", "%%template%%")));
+    }
+
+    #[test]
+    fn upper_first_handles_edge_cases() {
+        assert_eq!(upper_first(""), "");
+        assert_eq!(upper_first("a"), "A");
+        assert_eq!(upper_first("éclair"), "Éclair");
+        assert_eq!(upper_first("ßx"), "SSx");
+    }
 }
