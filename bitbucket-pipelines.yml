@@ -25,10 +25,10 @@ definitions:
         script:
           - rustup component add rustfmt clippy llvm-tools-preview
           - curl -fsSL "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-llvm-cov-$(uname -m)-unknown-linux-gnu.tar.gz" | tar -xz -C "${CARGO_HOME:-$HOME/.cargo}/bin"
-          - make -f .makefile lint
+          - make lint
           # Runs the tests under instrumentation (replaces `make test`) and
           # writes coverage/<tool>.lcov with repo-relative source paths.
-          - make -f .makefile coverage
+          - make coverage
         artifacts:
           - coverage/*.lcov
 

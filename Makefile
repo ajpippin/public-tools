@@ -10,7 +10,7 @@ COVERAGE_DIR ?= coverage
 all: build
 
 help:
-	@echo "Usage: make -f .makefile [build|install|lint|test|coverage|check|clean|list] [TOOL=name]"
+	@echo "Usage: make [build|install|lint|test|coverage|check|clean|list] [TOOL=name]"
 	@echo
 	@echo "Without TOOL, targets operate on every discovered Rust tool."
 	@echo "coverage writes one LCOV report per tool to $(COVERAGE_DIR)/<tool>.lcov."

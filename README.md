@@ -34,26 +34,26 @@ reference.
 
 ## Build and test
 
-The top-level hidden makefile automatically discovers Rust tools in this
+The top-level `Makefile` automatically discovers Rust tools in this
 directory.
 
 ```sh
 # Build, lint, or test every tool
-make -f .makefile build
-make -f .makefile lint      # rustfmt --check and Clippy with warnings denied
-make -f .makefile test
-make -f .makefile check     # lint, then test
+make build
+make lint      # rustfmt --check and Clippy with warnings denied
+make test
+make check     # lint, then test
 
 # Run tests under cargo-llvm-cov and write coverage/<tool>.lcov
-make -f .makefile coverage
+make coverage
 
 # Operate on one tool
-make -f .makefile build TOOL=topic
-make -f .makefile test TOOL=template
+make build TOOL=topic
+make test TOOL=template
 
 # List discovered tools and makefile usage
-make -f .makefile list
-make -f .makefile help
+make list
+make help
 ```
 
 Release builds use Cargo's standard optimized release profile.
@@ -80,19 +80,19 @@ SonarQube settings are in `sonar-project.properties` (project key
 Install every binary:
 
 ```sh
-make -f .makefile install
+make install
 ```
 
 Install one binary:
 
 ```sh
-make -f .makefile install TOOL=ollama-shelf
+make install TOOL=ollama-shelf
 ```
 
 `BINDIR` defaults to `$HOME/.local/bin` and can be overridden:
 
 ```sh
-make -f .makefile install BINDIR=/custom/bin
+make install BINDIR=/custom/bin
 ```
 
 Installing `template` also installs its bundled templates under
@@ -125,10 +125,10 @@ configuration to create it from.
 
 ```sh
 # Remove build artifacts for every tool
-make -f .makefile clean
+make clean
 
 # Remove build artifacts for one tool
-make -f .makefile clean TOOL=topic
+make clean TOOL=topic
 ```
 
 See [COMPLETED.md](COMPLETED.md) for the conversion and setup work already

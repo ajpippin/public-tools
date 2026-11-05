@@ -87,3 +87,8 @@
 - Added `ytd init`, which prints a default configuration file to stdout. `ytd` no
   longer creates its configuration, and stops with its help when the file is
   missing.
+
+## Build system
+
+- Renamed the top-level `.makefile` to `Makefile`, so `make` works without `-f`.
+  The per-tool `.makefile` files are unchanged.

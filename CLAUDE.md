@@ -10,14 +10,14 @@ Each tool's README is its full command and configuration reference. `docs/` hold
 
 ## Commands
 
-The makefile is hidden, so `-f .makefile` is required. Omit `TOOL=` to run against every tool.
+Omit `TOOL=` to run against every tool.
 
 ```sh
-make -f .makefile build [TOOL=topic]
-make -f .makefile lint [TOOL=topic]      # rustfmt --check, then Clippy with -D warnings
-make -f .makefile test [TOOL=topic]
-make -f .makefile check [TOOL=topic]     # lint, then test
-make -f .makefile coverage [TOOL=topic]  # needs cargo-llvm-cov and llvm-tools-preview
+make build [TOOL=topic]
+make lint [TOOL=topic]      # rustfmt --check, then Clippy with -D warnings
+make test [TOOL=topic]
+make check [TOOL=topic]     # lint, then test
+make coverage [TOOL=topic]  # needs cargo-llvm-cov and llvm-tools-preview
 ```
 
 Run a single test, or only the integration tests:
