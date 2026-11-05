@@ -1,5 +1,0 @@
-yt_dlp_binary: yt-dlp
-download_dir: ~/Downloads
-output_template: "%(title)s [%(id)s].%(ext)s"
-extra_args:
-  - --embed-metadata

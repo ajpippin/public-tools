@@ -81,3 +81,9 @@
   the coverage check, and the SonarQube paths. `get` downloads with a configured
   directory, file name template, and default options, and `list` shows the
   videos in a playlist or channel.
+- Moved the `ytd` configuration from YAML to `$XDG_CONFIG_HOME/etc/ytd.toml`, and
+  added an `[env]` table for default environment values.
+- Added `[aliases]` to `ytd`, with the same expansion rules as `tt`.
+- Added `ytd init`, which prints a default configuration file to stdout. `ytd` no
+  longer creates its configuration, and stops with its help when the file is
+  missing.
