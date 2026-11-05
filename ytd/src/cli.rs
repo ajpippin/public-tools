@@ -1,11 +1,14 @@
 use crate::config::{self, Config};
 use anyhow::{Context, Result, bail};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
+use std::collections::BTreeMap;
+use std::env;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const LIST_TEMPLATE: &str = "%(title)s [%(id)s]";
+const COMMANDS: [&str; 4] = ["get", "init", "list", "help"];
 
 #[derive(Parser)]
 #[command(
@@ -18,7 +21,7 @@ struct Cli {
         long,
         global = true,
         value_name = "FILE",
-        help = "YAML configuration file (or YTD_CONFIG)"
+        help = "TOML configuration file (or YTD_CONFIG)"
     )]
     config: Option<PathBuf>,
     #[command(subcommand)]
@@ -40,6 +43,8 @@ enum Action {
         #[command(flatten)]
         target: Target,
     },
+    /// Print a default configuration file.
+    Init,
     /// List the videos in a playlist or channel without downloading them.
     List {
         #[command(flatten)]
@@ -60,16 +65,38 @@ struct Target {
 }
 
 pub fn run() -> Result<()> {
-    let cli = Cli::parse();
-    let path = match &cli.config {
-        Some(path) => path.clone(),
+    let args: Vec<OsString> = env::args_os().collect();
+    // These have to work when the configuration is missing or broken.
+    match Cli::try_parse_from(&args) {
+        Ok(cli) if matches!(cli.command, Action::Init) => {
+            print!("{}", config::STARTER);
+            return Ok(());
+        }
+        Err(error) if !error.use_stderr() => error.exit(),
+        _ => {}
+    }
+    let path = match config_argument(&args) {
+        Some(path) => path,
         None => config::default_path()?,
     };
-    config::ensure(&path)?;
+    if !path.exists() {
+        bail!("{}", missing_config(&path));
+    }
     let settings = config::load(&path)?;
+    let cli = Cli::parse_from(expand_aliases(args, &settings.aliases));
+    if matches!(cli.command, Action::Init) {
+        print!("{}", config::STARTER);
+        return Ok(());
+    }
     let binary = &settings.yt_dlp_binary;
     let status = Command::new(binary)
-        .args(arguments(&cli.command, &settings))
+        .args(arguments(&cli.command, &settings)?)
+        .envs(
+            settings
+                .env
+                .iter()
+                .filter(|(name, _)| env::var_os(name).is_none()),
+        )
         .status()
         .with_context(|| format!("run {binary}"))?;
     if !status.success() {
@@ -78,10 +105,90 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-fn arguments(action: &Action, settings: &Config) -> Vec<OsString> {
+fn missing_config(path: &Path) -> String {
+    let mkdir = path
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .map_or(String::new(), |dir| {
+            format!("  mkdir -p \"{}\"\n", dir.display())
+        });
+    format!(
+        "no configuration file at {path}\n\nCreate one with:\n{mkdir}  ytd init > \"{path}\"\n\n{help}",
+        path = path.display(),
+        help = Cli::command().render_help().to_string().trim_end(),
+    )
+}
+
+// Aliases are in the configuration, so --config is found before clap runs.
+fn config_argument(args: &[OsString]) -> Option<PathBuf> {
+    let options = &args[..args
+        .iter()
+        .position(|arg| arg == "--")
+        .unwrap_or(args.len())];
+    options.iter().enumerate().skip(1).find_map(|(index, arg)| {
+        if arg == "--config" {
+            options.get(index + 1).map(PathBuf::from)
+        } else {
+            arg.to_str()?.strip_prefix("--config=").map(PathBuf::from)
+        }
+    })
+}
+
+// Git-style expansion: the longest key matching the leading words wins, a
+// one-word key never hides a command, and an expansion is not expanded again.
+fn expand_aliases(args: Vec<OsString>, aliases: &BTreeMap<String, String>) -> Vec<OsString> {
+    let start = match args.get(1).and_then(|arg| arg.to_str()) {
+        Some("--config") => 3,
+        Some(arg) if arg.starts_with("--config=") => 2,
+        _ => 1,
+    }
+    .min(args.len());
+    let words: Vec<&str> = args[start..]
+        .iter()
+        .map_while(|arg| arg.to_str())
+        .take_while(|arg| !arg.starts_with('-'))
+        .collect();
+    let best = aliases
+        .iter()
+        .map(|(key, value)| (key.split_whitespace().collect::<Vec<_>>(), value))
+        .filter(|(key, _)| !key.is_empty() && words.starts_with(key))
+        .filter(|(key, _)| key.len() > 1 || !COMMANDS.contains(&key[0]))
+        .max_by_key(|(key, _)| key.len());
+    let Some((key, expansion)) = best else {
+        return args;
+    };
+    let expansion: Vec<OsString> = expansion.split_whitespace().map(Into::into).collect();
+    let mut expanded = args[..start].to_vec();
+    expanded.extend(splice(expansion, args[start + key.len()..].to_vec()));
+    expanded
+}
+
+// An expansion with its own -- still takes URLs from the command line, so they
+// go ahead of that --, and only one -- survives.
+fn splice(mut expansion: Vec<OsString>, mut rest: Vec<OsString>) -> Vec<OsString> {
+    let Some(separator) = expansion.iter().position(|arg| arg == "--") else {
+        expansion.append(&mut rest);
+        return expansion;
+    };
+    let passthrough = match rest.iter().position(|arg| arg == "--") {
+        Some(index) => rest.drain(index..).skip(1).collect(),
+        None => vec![],
+    };
+    let tail = expansion.split_off(separator);
+    expansion.extend(rest);
+    expansion.extend(tail);
+    expansion.extend(passthrough);
+    expansion
+}
+
+fn arguments(action: &Action, settings: &Config) -> Result<Vec<OsString>> {
     let (mut args, target): (Vec<OsString>, _) = match action {
         Action::Get { dir, audio, target } => {
-            let dir = dir.as_ref().unwrap_or(&settings.download_dir);
+            // An alias reaches here without the shell having expanded it.
+            let dir = match dir {
+                Some(dir) => config::expand_home(dir.clone())?,
+                None => settings.download_dir.clone(),
+            };
             let mut args = vec![
                 "--paths".into(),
                 dir.into(),
@@ -93,6 +200,7 @@ fn arguments(action: &Action, settings: &Config) -> Vec<OsString> {
             }
             (args, target)
         }
+        Action::Init => unreachable!("init runs no yt-dlp command"),
         Action::List { target } => (
             vec![
                 "--flat-playlist".into(),
@@ -106,7 +214,7 @@ fn arguments(action: &Action, settings: &Config) -> Vec<OsString> {
     args.extend(target.passthrough.iter().map(Into::into));
     args.push("--".into());
     args.extend(target.urls.iter().map(Into::into));
-    args
+    Ok(args)
 }
 
 #[cfg(test)]
@@ -119,15 +227,145 @@ mod tests {
             download_dir: "/downloads".into(),
             output_template: "%(id)s.%(ext)s".into(),
             extra_args: vec!["--no-mtime".into()],
+            aliases: BTreeMap::new(),
+            env: BTreeMap::new(),
         }
     }
 
     fn built(args: &[&str]) -> Vec<String> {
         let cli = Cli::try_parse_from([&["ytd"], args].concat()).unwrap();
         arguments(&cli.command, &settings())
+            .unwrap()
             .into_iter()
             .map(|arg| arg.into_string().unwrap())
             .collect()
+    }
+
+    fn expanded(args: &[&str], aliases: &[(&str, &str)]) -> Vec<String> {
+        let args = [&["ytd"], args].concat().iter().map(Into::into).collect();
+        let aliases = aliases
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect();
+        expand_aliases(args, &aliases)
+            .into_iter()
+            .skip(1)
+            .map(|arg| arg.into_string().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn expands_alias_and_keeps_trailing_arguments() {
+        let aliases = [("m", "get --audio")];
+        assert_eq!(
+            expanded(&["m", "u1", "--dir", "/d"], &aliases),
+            ["get", "--audio", "u1", "--dir", "/d"]
+        );
+    }
+
+    #[test]
+    fn leaves_unmatched_arguments_alone() {
+        let aliases = [("m", "get --audio")];
+        assert_eq!(expanded(&[], &aliases), [""; 0]);
+        assert_eq!(expanded(&["get", "m"], &aliases), ["get", "m"]);
+        assert_eq!(expanded(&["--version"], &aliases), ["--version"]);
+    }
+
+    #[test]
+    fn one_word_alias_never_hides_a_command() {
+        for command in COMMANDS {
+            assert_eq!(
+                expanded(&[command, "u1"], &[(command, "x")]),
+                [command, "u1"]
+            );
+        }
+    }
+
+    #[test]
+    fn multi_word_alias_may_start_with_a_command() {
+        let aliases = [("get  audio", "get --audio")];
+        assert_eq!(
+            expanded(&["get", "audio", "u1"], &aliases),
+            ["get", "--audio", "u1"]
+        );
+        assert_eq!(expanded(&["get", "u1"], &aliases), ["get", "u1"]);
+    }
+
+    #[test]
+    fn longest_alias_wins_and_flags_end_the_key() {
+        let aliases = [("x", "get"), ("x y", "list")];
+        assert_eq!(expanded(&["x", "y", "u1"], &aliases), ["list", "u1"]);
+        assert_eq!(expanded(&["x", "u1"], &aliases), ["get", "u1"]);
+        assert_eq!(expanded(&["x", "--", "y"], &aliases), ["get", "--", "y"]);
+    }
+
+    #[test]
+    fn expansion_is_not_expanded_again() {
+        let aliases = [("a", "b"), ("b", "get")];
+        assert_eq!(expanded(&["a", "u1"], &aliases), ["b", "u1"]);
+    }
+
+    #[test]
+    fn alias_may_follow_leading_config_option() {
+        let aliases = [("m", "get")];
+        assert_eq!(
+            expanded(&["--config", "f", "m", "u1"], &aliases),
+            ["--config", "f", "get", "u1"]
+        );
+        assert_eq!(
+            expanded(&["--config=f", "m", "u1"], &aliases),
+            ["--config=f", "get", "u1"]
+        );
+        assert_eq!(expanded(&["--config"], &aliases), ["--config"]);
+    }
+
+    #[test]
+    fn urls_go_ahead_of_a_separator_in_the_expansion() {
+        let aliases = [("hd", "get -- --format best")];
+        assert_eq!(
+            expanded(&["hd", "u1", "u2"], &aliases),
+            ["get", "u1", "u2", "--", "--format", "best"]
+        );
+        assert_eq!(
+            expanded(&["hd", "u1", "--", "-q"], &aliases),
+            ["get", "u1", "--", "--format", "best", "-q"]
+        );
+    }
+
+    #[test]
+    fn missing_config_explains_how_to_create_one() {
+        let message = missing_config(Path::new("/x/etc/ytd.toml"));
+        assert!(message.starts_with("no configuration file at /x/etc/ytd.toml\n"));
+        assert!(message.contains("  mkdir -p \"/x/etc\"\n"));
+        assert!(message.contains("  ytd init > \"/x/etc/ytd.toml\"\n"));
+        assert!(message.contains("Usage: ytd"));
+        assert!(!missing_config(Path::new("ytd.toml")).contains("mkdir"));
+    }
+
+    #[test]
+    fn finds_config_argument_before_parsing() {
+        let found = |args: &[&str]| {
+            let args: Vec<OsString> = [&["ytd"], args].concat().iter().map(Into::into).collect();
+            config_argument(&args)
+        };
+        assert_eq!(found(&["--config", "f", "get"]), Some("f".into()));
+        assert_eq!(found(&["get", "u1", "--config=f"]), Some("f".into()));
+        assert_eq!(found(&["get", "u1"]), None);
+        assert_eq!(found(&["--config"]), None);
+        assert_eq!(found(&["get", "u1", "--", "--config", "f"]), None);
+    }
+
+    #[test]
+    fn expands_home_in_dir_option() {
+        let args = built(&["get", "--dir", "~/Music", "u1"]);
+        assert_eq!(
+            args[1],
+            dirs::home_dir()
+                .unwrap()
+                .join("Music")
+                .display()
+                .to_string()
+        );
     }
 
     #[test]

@@ -1,15 +1,21 @@
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::env;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::ffi::OsString;
+use std::fs;
 use std::path::{Path, PathBuf};
 
-const STARTER: &str = "# ytd configuration. Uncomment and edit values to override defaults.\n\
-# yt_dlp_binary: yt-dlp\n\
-# download_dir: ~/Downloads\n\
-# output_template: \"%(title)s [%(id)s].%(ext)s\"\n\
-# extra_args: []\n";
+pub const STARTER: &str = "# ytd configuration. Uncomment and edit values to override defaults.\n\
+# A variable under [env] is used only if it is not already set in the environment.\n\
+# yt_dlp_binary = \"yt-dlp\"\n\
+# download_dir = \"~/Downloads\"\n\
+# output_template = \"%(title)s [%(id)s].%(ext)s\"\n\
+# extra_args = []\n\
+# [aliases]\n\
+# music = \"get --audio --dir ~/Music\"\n\
+# [env]\n\
+# HTTPS_PROXY = \"http://proxy.example.com:8080\"\n";
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -17,15 +23,29 @@ pub struct Config {
     pub download_dir: PathBuf,
     pub output_template: String,
     pub extra_args: Vec<String>,
+    pub aliases: BTreeMap<String, String>,
+    pub env: BTreeMap<String, String>,
 }
 
 pub fn default_path() -> Result<PathBuf> {
     if let Some(path) = env::var_os("YTD_CONFIG").filter(|value| !value.is_empty()) {
         return Ok(path.into());
     }
-    Ok(dirs::home_dir()
-        .context("cannot determine home directory")?
-        .join(".config/tools/ytd.yaml"))
+    path_in(env::var_os("XDG_CONFIG_HOME"), dirs::home_dir())
+}
+
+fn path_in(xdg_config_home: Option<OsString>, home: Option<PathBuf>) -> Result<PathBuf> {
+    // The XDG specification says to ignore a relative XDG_CONFIG_HOME.
+    let base = match xdg_config_home
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+    {
+        Some(path) => path,
+        None => home
+            .context("cannot determine home directory")?
+            .join(".config"),
+    };
+    Ok(base.join("etc/ytd.toml"))
 }
 
 pub fn defaults() -> Config {
@@ -34,27 +54,27 @@ pub fn defaults() -> Config {
         download_dir: dirs::home_dir().unwrap_or_default().join("Downloads"),
         output_template: "%(title)s [%(id)s].%(ext)s".into(),
         extra_args: vec![],
+        aliases: BTreeMap::new(),
+        env: BTreeMap::new(),
     }
 }
 
 #[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ConfigFile {
     yt_dlp_binary: Option<String>,
     download_dir: Option<PathBuf>,
     output_template: Option<String>,
     extra_args: Option<Vec<String>>,
+    aliases: Option<BTreeMap<String, String>>,
+    env: Option<BTreeMap<String, String>>,
 }
 
 pub fn load(path: &Path) -> Result<Config> {
     let mut settings = defaults();
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(settings),
-        Err(error) => return Err(error).with_context(|| format!("read config {:?}", path)),
-    };
-    let file: ConfigFile = serde_yaml::from_str::<Option<ConfigFile>>(&text)
-        .with_context(|| format!("parse config {:?}", path))?
-        .unwrap_or_default();
+    let text = fs::read_to_string(path).with_context(|| format!("read config {:?}", path))?;
+    let file: ConfigFile =
+        toml::from_str(&text).with_context(|| format!("parse config {:?}", path))?;
     if let Some(v) = file.yt_dlp_binary {
         settings.yt_dlp_binary = v;
     }
@@ -67,6 +87,12 @@ pub fn load(path: &Path) -> Result<Config> {
     if let Some(v) = file.extra_args {
         settings.extra_args = v;
     }
+    if let Some(v) = file.aliases {
+        settings.aliases = v;
+    }
+    if let Some(v) = file.env {
+        settings.env = v;
+    }
     if settings.yt_dlp_binary.trim().is_empty() {
         bail!("config {:?} has an empty yt_dlp_binary", path);
     }
@@ -76,28 +102,16 @@ pub fn load(path: &Path) -> Result<Config> {
     if settings.output_template.trim().is_empty() {
         bail!("config {:?} has an empty output_template", path);
     }
+    for (name, value) in &settings.env {
+        if name.is_empty() || name.contains(['=', '\0']) || value.contains('\0') {
+            bail!(
+                "config {:?} has invalid environment variable {name:?}",
+                path
+            );
+        }
+    }
     settings.download_dir = expand_home(settings.download_dir)?;
     Ok(settings)
-}
-
-pub fn initialize(path: &Path) -> Result<bool> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut file = match OpenOptions::new().write(true).create_new(true).open(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
-        Err(error) => return Err(error).with_context(|| format!("create config {:?}", path)),
-    };
-    file.write_all(STARTER.as_bytes())?;
-    Ok(true)
-}
-
-pub fn ensure(path: &Path) -> Result<bool> {
-    if path.exists() {
-        return Ok(false);
-    }
-    initialize(path)
 }
 
 pub fn expand_home(path: PathBuf) -> Result<PathBuf> {
@@ -119,7 +133,7 @@ mod tests {
 
     fn write_config(text: &str) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.yaml");
+        let path = dir.path().join("config.toml");
         fs::write(&path, text).unwrap();
         (dir, path)
     }
@@ -130,36 +144,71 @@ mod tests {
     }
 
     #[test]
-    fn missing_or_empty_config_uses_defaults() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = load(&dir.path().join("missing.yaml")).unwrap();
+    fn path_follows_xdg_config_home() {
+        let home = Some(PathBuf::from("/home/a"));
+        let path = |xdg: Option<&str>| path_in(xdg.map(Into::into), home.clone()).unwrap();
+        assert_eq!(path(Some("/xdg")), PathBuf::from("/xdg/etc/ytd.toml"));
+        let fallback = PathBuf::from("/home/a/.config/etc/ytd.toml");
+        assert_eq!(path(None), fallback);
+        assert_eq!(path(Some("")), fallback);
+        assert_eq!(path(Some("relative")), fallback);
+    }
+
+    #[test]
+    fn empty_config_uses_defaults() {
+        let (_dir, path) = write_config("");
+        let config = load(&path).unwrap();
         assert_eq!(config.yt_dlp_binary, "yt-dlp");
         assert!(config.download_dir.ends_with("Downloads"));
-        let (_dir, path) = write_config("");
-        assert_eq!(
-            load(&path).unwrap().output_template,
-            defaults().output_template
-        );
+        assert_eq!(config.output_template, defaults().output_template);
+        assert!(config.aliases.is_empty());
+        assert!(config.env.is_empty());
+    }
+
+    #[test]
+    fn reports_missing_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = load(&dir.path().join("missing.toml")).unwrap_err();
+        assert!(error.to_string().starts_with("read config"));
     }
 
     #[test]
     fn loads_and_expands_config() {
         let (_dir, path) = write_config(
-            "yt_dlp_binary: /opt/yt-dlp\ndownload_dir: ~/video\noutput_template: '%(id)s'\nextra_args:\n  - --no-mtime\n",
+            "yt_dlp_binary = \"/opt/yt-dlp\"\ndownload_dir = \"~/video\"\noutput_template = \"%(id)s\"\nextra_args = [\"--no-mtime\"]\n[aliases]\nm = \"get --audio\"\n[env]\nA = \"1\"\nB = \"\"\n",
         );
         let config = load(&path).unwrap();
         assert_eq!(config.yt_dlp_binary, "/opt/yt-dlp");
         assert_eq!(config.download_dir, dirs::home_dir().unwrap().join("video"));
         assert_eq!(config.output_template, "%(id)s");
         assert_eq!(config.extra_args, ["--no-mtime"]);
+        assert_eq!(config.aliases["m"], "get --audio");
+        assert_eq!(
+            config.env,
+            BTreeMap::from([("A".into(), "1".into()), ("B".into(), String::new())])
+        );
     }
 
     #[test]
     fn rejects_empty_settings() {
-        assert!(load_error("yt_dlp_binary: ' '\n").ends_with("has an empty yt_dlp_binary"));
-        assert!(load_error("download_dir: ''\n").ends_with("has an empty download_dir"));
-        assert!(load_error("output_template: ' '\n").ends_with("has an empty output_template"));
-        assert!(load_error("download_dir: [unterminated\n").starts_with("parse config"));
+        assert!(load_error("yt_dlp_binary = ' '\n").ends_with("has an empty yt_dlp_binary"));
+        assert!(load_error("download_dir = ''\n").ends_with("has an empty download_dir"));
+        assert!(load_error("output_template = ' '\n").ends_with("has an empty output_template"));
+    }
+
+    #[test]
+    fn rejects_invalid_files() {
+        assert!(load_error("download_dir = [\n").starts_with("parse config"));
+        assert!(load_error("unknown = 1\n").starts_with("parse config"));
+        assert!(load_error("[env]\nA = 1\n").starts_with("parse config"));
+    }
+
+    #[test]
+    fn rejects_invalid_environment_variables() {
+        let invalid = "invalid environment variable";
+        assert!(load_error("[env]\n\"A=B\" = \"1\"\n").contains(invalid));
+        assert!(load_error("[env]\n\"\" = \"1\"\n").contains(invalid));
+        assert!(load_error("[env]\nA = \"\\u0000\"\n").contains(invalid));
     }
 
     #[test]
@@ -173,23 +222,20 @@ mod tests {
 
     #[test]
     fn starter_config_is_all_comments_and_matches_defaults_when_uncommented() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.yaml");
-        assert!(ensure(&path).unwrap());
-        assert!(!ensure(&path).unwrap());
-        let text = fs::read_to_string(&path).unwrap();
-        assert!(text.lines().all(|line| line.starts_with('#')));
-        let uncommented: String = text
+        assert!(STARTER.lines().all(|line| line.starts_with('#')));
+        let uncommented: String = STARTER
             .lines()
-            .skip(1)
+            .skip(2)
             .map(|line| format!("{}\n", line.strip_prefix("# ").unwrap()))
             .collect();
-        fs::write(&path, uncommented).unwrap();
+        let (_dir, path) = write_config(&uncommented);
         let config = load(&path).unwrap();
         let expected = defaults();
         assert_eq!(config.yt_dlp_binary, expected.yt_dlp_binary);
         assert_eq!(config.download_dir, expected.download_dir);
         assert_eq!(config.output_template, expected.output_template);
         assert_eq!(config.extra_args, expected.extra_args);
+        assert_eq!(config.aliases.len(), 1);
+        assert_eq!(config.env.len(), 1);
     }
 }
