@@ -33,6 +33,10 @@ and `--audio` extracts the audio only.
 `--dump-single-json`, without downloading anything. It prints one JSON document
 per URL. `--text` prints a `title [id]` line per video instead.
 
+`list` also takes the URL of a video within a playlist, such as one with
+`watch?v=...&list=...`, and lists the playlist from its `list=` value. Quote a
+URL like that, because the shell treats `?` and `&` as special characters.
+
 Playlists can include videos that yt-dlp returns with only an `id` and
 `url`. Those have no `title` in the JSON, and `--text` shows them as `NA`.
 

@@ -394,3 +394,19 @@ fn mistyped_option_is_still_an_error() {
         .failure()
         .stderr(predicate::str::contains("unexpected argument"));
 }
+
+#[test]
+fn list_extracts_playlist_from_video_url() {
+    let fixture = fixture();
+    fixture
+        .run()
+        .args([
+            "list",
+            "https://www.youtube.com/watch?v=ajHK8gJcS_U&list=PLBM6cXvJ9jZShrKjJPWs8DxzND8c12u-t&pp=0gcJCR0Ga94AFGB0",
+        ])
+        .assert()
+        .success();
+    assert!(fixture.recorded().ends_with(
+        "--\nhttps://www.youtube.com/playlist?list=PLBM6cXvJ9jZShrKjJPWs8DxzND8c12u-t\n"
+    ));
+}

@@ -9,6 +9,7 @@ use std::process::Command;
 
 const LIST_TEMPLATE: &str = "%(title)s [%(id)s]";
 const VIDEO_URL: &str = "https://www.youtube.com/watch?v=";
+const PLAYLIST_URL: &str = "https://www.youtube.com/playlist?list=";
 const COMMANDS: [&str; 4] = ["get", "init", "list", "help"];
 
 #[derive(Parser)]
@@ -210,6 +211,26 @@ fn is_dashed_video_id(arg: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
+// The playlist behind a YouTube URL, which may be a video's URL within it. A
+// generated mix (RD...) has no playlist page, so it keeps its own URL.
+fn playlist_url(url: &str) -> Option<String> {
+    let (location, query) = url.split_once('?')?;
+    let host = location.split_once("://")?.1.split('/').next()?;
+    let youtube = ["youtube.com", "youtu.be"]
+        .iter()
+        .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")));
+    if !youtube {
+        return None;
+    }
+    query
+        .split('#')
+        .next()?
+        .split('&')
+        .find_map(|parameter| parameter.strip_prefix("list="))
+        .filter(|id| !id.is_empty() && !id.starts_with("RD"))
+        .map(|id| format!("{PLAYLIST_URL}{id}"))
+}
+
 fn arguments(action: &Action, settings: &Config) -> Result<Vec<OsString>> {
     let (mut args, target): (Vec<OsString>, _) = match action {
         Action::Get { dir, audio, target } => {
@@ -243,7 +264,11 @@ fn arguments(action: &Action, settings: &Config) -> Result<Vec<OsString>> {
     args.extend(settings.extra_args.iter().map(Into::into));
     args.extend(target.passthrough.iter().map(Into::into));
     args.push("--".into());
-    args.extend(target.urls.iter().map(Into::into));
+    let list = matches!(action, Action::List { .. });
+    for url in &target.urls {
+        let playlist = if list { playlist_url(url) } else { None };
+        args.push(playlist.unwrap_or_else(|| url.clone()).into());
+    }
     Ok(args)
 }
 
@@ -393,6 +418,47 @@ mod tests {
         ] {
             assert_eq!(protected(args), args);
         }
+    }
+
+    #[test]
+    fn extracts_playlist_from_youtube_urls() {
+        let expected = Some(format!("{PLAYLIST_URL}PLabc-d_e"));
+        for url in [
+            "https://www.youtube.com/watch?v=x1&list=PLabc-d_e&pp=y",
+            "https://www.youtube.com/watch?list=PLabc-d_e",
+            "https://www.youtube.com/playlist?list=PLabc-d_e",
+            "https://music.youtube.com/watch?v=x1&list=PLabc-d_e#top",
+            "https://youtu.be/x1?list=PLabc-d_e",
+            "http://m.youtube.com/watch?v=x1&list=PLabc-d_e",
+        ] {
+            assert_eq!(playlist_url(url), expected, "{url}");
+        }
+    }
+
+    #[test]
+    fn leaves_urls_without_a_youtube_playlist_alone() {
+        for url in [
+            "PLabc-d_e",
+            "https://www.youtube.com/watch?v=x1",
+            "https://www.youtube.com/watch?v=x1&list=",
+            "https://www.youtube.com/watch?v=x1&list=RDx1",
+            "https://www.youtube.com/watch?v=x1&playlist=PLa",
+            "https://www.youtube.com/@channel",
+            "https://example.com/watch?list=PLa",
+            "https://notyoutube.com/watch?list=PLa",
+        ] {
+            assert_eq!(playlist_url(url), None, "{url}");
+        }
+    }
+
+    #[test]
+    fn only_list_extracts_the_playlist() {
+        let url = "https://www.youtube.com/watch?v=x1&list=PLa";
+        assert_eq!(built(&["get", url]).last().unwrap(), url);
+        assert_eq!(
+            built(&["list", url]).last().unwrap(),
+            "https://www.youtube.com/playlist?list=PLa"
+        );
     }
 
     #[test]
