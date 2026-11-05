@@ -74,3 +74,10 @@
     could create) the default configuration.
 - Changed `topic list 00` to cover 0000-0099, matching other two-digit
   sections; `topic list 0` still covers 0000-0999.
+
+## New tools
+
+- Added `ytd`, a Rust wrapper around yt-dlp, and included it in the CI caches,
+  the coverage check, and the SonarQube paths. `get` downloads with a configured
+  directory, file name template, and default options, and `list` shows the
+  videos in a playlist or channel.

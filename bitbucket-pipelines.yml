@@ -8,6 +8,7 @@ definitions:
     cargo-target-ollama-shelf: ollama-shelf/target
     cargo-target-template: template/target
     cargo-target-topic: topic/target
+    cargo-target-ytd: ytd/target
     sonar: /opt/sonar-scanner/.sonar
     trivy: .trivycache
   steps:
@@ -20,6 +21,7 @@ definitions:
           - cargo-target-ollama-shelf
           - cargo-target-template
           - cargo-target-topic
+          - cargo-target-ytd
         script:
           - rustup component add rustfmt clippy llvm-tools-preview
           - curl -fsSL "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-llvm-cov-$(uname -m)-unknown-linux-gnu.tar.gz" | tar -xz -C "${CARGO_HOME:-$HOME/.cargo}/bin"
@@ -56,7 +58,7 @@ pipelines:
           caches:
             - sonar
           script:
-            - for tool in ollama-shelf template topic; do test -s "coverage/$tool.lcov"; done
+            - for tool in ollama-shelf template topic ytd; do test -s "coverage/$tool.lcov"; done
             - >-
               sonar-scanner
               -Dsonar.host.url=${SONAR_HOST_URL}

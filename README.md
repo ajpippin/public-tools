@@ -23,6 +23,12 @@ Browses and maintains a numbered personal topic library. It supports listing,
 searching, sections, configurable command aliases, editing with canonical
 timestamps, Git updates, and optional GPG-encrypted topics.
 
+### `ytd`
+
+Wraps yt-dlp with two commands: `get` downloads videos or audio using a
+configured directory, file name template, and default options, and `list` shows
+the videos in a playlist or channel without downloading them.
+
 Each tool has its own README with its complete command and configuration
 reference.
 
@@ -102,7 +108,8 @@ The tools keep their YAML configuration files together:
 ~/.config/tools/
 ├── shelves.yaml
 ├── template.yaml
-└── topic.yaml
+├── topic.yaml
+└── ytd.yaml
 ```
 
 Each binary automatically creates its missing configuration file with all
