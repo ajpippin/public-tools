@@ -244,6 +244,7 @@ fn arguments(action: &Action, settings: &Config) -> Result<Vec<OsString>> {
                 dir.into(),
                 "--output".into(),
                 (&settings.output_template).into(),
+                "--no-playlist".into(),
             ];
             if *audio {
                 args.push("--extract-audio".into());
@@ -506,6 +507,7 @@ mod tests {
                 "/downloads",
                 "--output",
                 "%(id)s.%(ext)s",
+                "--no-playlist",
                 "--no-mtime",
                 "--",
                 "https://example.com/a"
@@ -522,6 +524,7 @@ mod tests {
                 "/music",
                 "--output",
                 "%(id)s.%(ext)s",
+                "--no-playlist",
                 "--extract-audio",
                 "--no-mtime",
                 "-q",

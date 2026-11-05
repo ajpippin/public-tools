@@ -27,7 +27,9 @@ commit that was built (or `dev`) and the 7-character commit SHA, such as
 `ytd dev aa1af73`.
 
 `get` downloads each URL. `--dir` replaces the configured download directory,
-and `--audio` extracts the audio only.
+and `--audio` extracts the audio only. A video URL within a playlist downloads
+only that video, and a playlist URL still downloads the playlist. Add
+`-- --yes-playlist` to download the whole playlist from a video URL.
 
 `list` prints a playlist or channel as JSON, using yt-dlp's `--flat-playlist` and
 `--dump-single-json`, without downloading anything. It prints one JSON document

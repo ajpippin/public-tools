@@ -72,7 +72,7 @@ fn downloads_with_configured_settings() {
         .success();
     assert_eq!(
         fixture.recorded(),
-        "--paths\n/downloads\n--output\n%(id)s\n--\nhttps://example.com/a\n"
+        "--paths\n/downloads\n--output\n%(id)s\n--no-playlist\n--\nhttps://example.com/a\n"
     );
 }
 
@@ -94,7 +94,7 @@ fn passes_options_through() {
         .success();
     assert_eq!(
         fixture.recorded(),
-        "--paths\n/music\n--output\n%(id)s\n--extract-audio\n--no-mtime\n--\nu1\n"
+        "--paths\n/music\n--output\n%(id)s\n--no-playlist\n--extract-audio\n--no-mtime\n--\nu1\n"
     );
 }
 
@@ -275,7 +275,7 @@ fn expands_configured_alias() {
     fixture.run().args(["m", "u1"]).assert().success();
     assert_eq!(
         fixture.recorded(),
-        "--paths\n/music\n--output\n%(id)s\n--extract-audio\n--\nu1\n"
+        "--paths\n/music\n--output\n%(id)s\n--no-playlist\n--extract-audio\n--\nu1\n"
     );
 }
 
