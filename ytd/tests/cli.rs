@@ -185,7 +185,7 @@ fn lists_playlist_entries() {
         .success();
     assert_eq!(
         fixture.recorded(),
-        "--flat-playlist\n--print\n%(title)s [%(id)s]\n--\nhttps://example.com/playlist\n"
+        "--flat-playlist\n--dump-single-json\n--\nhttps://example.com/playlist\n"
     );
 }
 
@@ -356,4 +356,41 @@ fn init_can_be_reached_through_an_alias() {
         .assert()
         .success()
         .stdout(predicate::str::starts_with("# ytd configuration."));
+}
+
+#[test]
+fn accepts_video_id_starting_with_a_dash() {
+    let fixture = fixture();
+    fixture
+        .run()
+        .args(["get", "-jAq6qRM4nk"])
+        .assert()
+        .success();
+    assert!(
+        fixture
+            .recorded()
+            .ends_with("--\nhttps://www.youtube.com/watch?v=-jAq6qRM4nk\n")
+    );
+}
+
+#[test]
+fn accepts_dashed_video_id_after_an_alias() {
+    let fixture = fixture();
+    fixture.add_config("[aliases]\nhd = \"get -- --format best\"\n");
+    fixture.run().args(["hd", "-jAq6qRM4nk"]).assert().success();
+    assert!(
+        fixture
+            .recorded()
+            .ends_with("--format\nbest\n--\nhttps://www.youtube.com/watch?v=-jAq6qRM4nk\n")
+    );
+}
+
+#[test]
+fn mistyped_option_is_still_an_error() {
+    fixture()
+        .run()
+        .args(["get", "--audoi", "u1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unexpected argument"));
 }

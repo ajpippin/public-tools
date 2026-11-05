@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const LIST_TEMPLATE: &str = "%(title)s [%(id)s]";
+const VIDEO_URL: &str = "https://www.youtube.com/watch?v=";
 const COMMANDS: [&str; 4] = ["get", "init", "list", "help"];
 
 #[derive(Parser)]
@@ -47,6 +48,8 @@ enum Action {
     Init,
     /// List the videos in a playlist or channel without downloading them.
     List {
+        #[arg(long, help = "Print a title and ID line per video instead of JSON")]
+        text: bool,
         #[command(flatten)]
         target: Target,
     },
@@ -83,7 +86,7 @@ pub fn run() -> Result<()> {
         bail!("{}", missing_config(&path));
     }
     let settings = config::load(&path)?;
-    let cli = Cli::parse_from(expand_aliases(args, &settings.aliases));
+    let cli = Cli::parse_from(protect_video_ids(expand_aliases(args, &settings.aliases)));
     if matches!(cli.command, Action::Init) {
         print!("{}", config::STARTER);
         return Ok(());
@@ -181,6 +184,32 @@ fn splice(mut expansion: Vec<OsString>, mut rest: Vec<OsString>) -> Vec<OsString
     expansion
 }
 
+// A YouTube video ID can start with -, which clap would read as an option, so
+// those become URLs. Anything after -- is left for yt-dlp.
+fn protect_video_ids(args: Vec<OsString>) -> Vec<OsString> {
+    let end = args
+        .iter()
+        .position(|arg| arg == "--")
+        .unwrap_or(args.len());
+    args.into_iter()
+        .enumerate()
+        .map(|(index, arg)| match arg.to_str() {
+            Some(text) if index < end && is_dashed_video_id(text) => {
+                format!("{VIDEO_URL}{text}").into()
+            }
+            _ => arg,
+        })
+        .collect()
+}
+
+fn is_dashed_video_id(arg: &str) -> bool {
+    arg.len() == 11
+        && arg.starts_with('-')
+        && arg
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
 fn arguments(action: &Action, settings: &Config) -> Result<Vec<OsString>> {
     let (mut args, target): (Vec<OsString>, _) = match action {
         Action::Get { dir, audio, target } => {
@@ -201,14 +230,15 @@ fn arguments(action: &Action, settings: &Config) -> Result<Vec<OsString>> {
             (args, target)
         }
         Action::Init => unreachable!("init runs no yt-dlp command"),
-        Action::List { target } => (
-            vec![
-                "--flat-playlist".into(),
-                "--print".into(),
-                LIST_TEMPLATE.into(),
-            ],
-            target,
-        ),
+        Action::List { text, target } => {
+            let mut args = vec!["--flat-playlist".into()];
+            if *text {
+                args.extend(["--print".into(), LIST_TEMPLATE.into()]);
+            } else {
+                args.push("--dump-single-json".into());
+            }
+            (args, target)
+        }
     };
     args.extend(settings.extra_args.iter().map(Into::into));
     args.extend(target.passthrough.iter().map(Into::into));
@@ -332,6 +362,39 @@ mod tests {
         );
     }
 
+    fn protected(args: &[&str]) -> Vec<String> {
+        protect_video_ids(args.iter().map(Into::into).collect())
+            .into_iter()
+            .map(|arg| arg.into_string().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn dashed_video_ids_become_urls() {
+        assert_eq!(
+            protected(&["ytd", "get", "-jAq6qRM4nk", "--a_b-c_d-e"]),
+            [
+                "ytd",
+                "get",
+                "https://www.youtube.com/watch?v=-jAq6qRM4nk",
+                "https://www.youtube.com/watch?v=--a_b-c_d-e"
+            ]
+        );
+    }
+
+    #[test]
+    fn other_arguments_are_not_treated_as_video_ids() {
+        for args in [
+            &["ytd", "get", "--audio", "--dir", "/d", "V0pxDS3dpWg"][..],
+            &["ytd", "get", "-abcdefghi"],
+            &["ytd", "get", "-abcdefghijk"],
+            &["ytd", "get", "-abcdefghi!"],
+            &["ytd", "get", "u1", "--", "-jAq6qRM4nk"],
+        ] {
+            assert_eq!(protected(args), args);
+        }
+    }
+
     #[test]
     fn missing_config_explains_how_to_create_one() {
         let message = missing_config(Path::new("/x/etc/ytd.toml"));
@@ -404,15 +467,29 @@ mod tests {
     }
 
     #[test]
-    fn list_prints_playlist_entries_without_download_options() {
+    fn list_defaults_to_json_without_download_options() {
         assert_eq!(
             built(&["list", "u1", "--", "-q"]),
+            [
+                "--flat-playlist",
+                "--dump-single-json",
+                "--no-mtime",
+                "-q",
+                "--",
+                "u1"
+            ]
+        );
+    }
+
+    #[test]
+    fn list_text_prints_a_line_per_video() {
+        assert_eq!(
+            built(&["list", "--text", "u1"]),
             [
                 "--flat-playlist",
                 "--print",
                 "%(title)s [%(id)s]",
                 "--no-mtime",
-                "-q",
                 "--",
                 "u1"
             ]
