@@ -92,6 +92,7 @@
 - Fixed `ytd` rejecting bare video IDs that start with `-`.
 - Made `ytd list` extract the playlist from a YouTube URL's `list=` value.
 - Made `ytd get` download only the video from a video URL within a playlist.
+- Added `ytd get --transcript`, which saves a video's captions as plain text.
 
 ## Build system
 
