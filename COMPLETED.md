@@ -88,6 +88,11 @@
   longer creates its configuration, and stops with its help when the file is
   missing.
 
+- Changed `ytd list` to print JSON by default, with `--text` for a line per video.
+- Fixed `ytd` rejecting bare video IDs that start with `-`.
+- Made `ytd list` extract the playlist from a YouTube URL's `list=` value.
+- Made `ytd get` download only the video from a video URL within a playlist.
+
 ## Build system
 
 - Renamed the top-level `.makefile` to `Makefile`, so `make` works without `-f`.

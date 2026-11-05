@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const LIST_TEMPLATE: &str = "%(title)s [%(id)s]";
+const VIDEO_URL: &str = "https://www.youtube.com/watch?v=";
+const PLAYLIST_URL: &str = "https://www.youtube.com/playlist?list=";
 const COMMANDS: [&str; 4] = ["get", "init", "list", "help"];
 
 #[derive(Parser)]
@@ -47,6 +49,8 @@ enum Action {
     Init,
     /// List the videos in a playlist or channel without downloading them.
     List {
+        #[arg(long, help = "Print a title and ID line per video instead of JSON")]
+        text: bool,
         #[command(flatten)]
         target: Target,
     },
@@ -83,7 +87,7 @@ pub fn run() -> Result<()> {
         bail!("{}", missing_config(&path));
     }
     let settings = config::load(&path)?;
-    let cli = Cli::parse_from(expand_aliases(args, &settings.aliases));
+    let cli = Cli::parse_from(protect_video_ids(expand_aliases(args, &settings.aliases)));
     if matches!(cli.command, Action::Init) {
         print!("{}", config::STARTER);
         return Ok(());
@@ -181,6 +185,52 @@ fn splice(mut expansion: Vec<OsString>, mut rest: Vec<OsString>) -> Vec<OsString
     expansion
 }
 
+// A YouTube video ID can start with -, which clap would read as an option, so
+// those become URLs. Anything after -- is left for yt-dlp.
+fn protect_video_ids(args: Vec<OsString>) -> Vec<OsString> {
+    let end = args
+        .iter()
+        .position(|arg| arg == "--")
+        .unwrap_or(args.len());
+    args.into_iter()
+        .enumerate()
+        .map(|(index, arg)| match arg.to_str() {
+            Some(text) if index < end && is_dashed_video_id(text) => {
+                format!("{VIDEO_URL}{text}").into()
+            }
+            _ => arg,
+        })
+        .collect()
+}
+
+fn is_dashed_video_id(arg: &str) -> bool {
+    arg.len() == 11
+        && arg.starts_with('-')
+        && arg
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+// The playlist behind a YouTube URL, which may be a video's URL within it. A
+// generated mix (RD...) has no playlist page, so it keeps its own URL.
+fn playlist_url(url: &str) -> Option<String> {
+    let (location, query) = url.split_once('?')?;
+    let host = location.split_once("://")?.1.split('/').next()?;
+    let youtube = ["youtube.com", "youtu.be"]
+        .iter()
+        .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")));
+    if !youtube {
+        return None;
+    }
+    query
+        .split('#')
+        .next()?
+        .split('&')
+        .find_map(|parameter| parameter.strip_prefix("list="))
+        .filter(|id| !id.is_empty() && !id.starts_with("RD"))
+        .map(|id| format!("{PLAYLIST_URL}{id}"))
+}
+
 fn arguments(action: &Action, settings: &Config) -> Result<Vec<OsString>> {
     let (mut args, target): (Vec<OsString>, _) = match action {
         Action::Get { dir, audio, target } => {
@@ -194,6 +244,7 @@ fn arguments(action: &Action, settings: &Config) -> Result<Vec<OsString>> {
                 dir.into(),
                 "--output".into(),
                 (&settings.output_template).into(),
+                "--no-playlist".into(),
             ];
             if *audio {
                 args.push("--extract-audio".into());
@@ -201,19 +252,24 @@ fn arguments(action: &Action, settings: &Config) -> Result<Vec<OsString>> {
             (args, target)
         }
         Action::Init => unreachable!("init runs no yt-dlp command"),
-        Action::List { target } => (
-            vec![
-                "--flat-playlist".into(),
-                "--print".into(),
-                LIST_TEMPLATE.into(),
-            ],
-            target,
-        ),
+        Action::List { text, target } => {
+            let mut args = vec!["--flat-playlist".into()];
+            if *text {
+                args.extend(["--print".into(), LIST_TEMPLATE.into()]);
+            } else {
+                args.push("--dump-single-json".into());
+            }
+            (args, target)
+        }
     };
     args.extend(settings.extra_args.iter().map(Into::into));
     args.extend(target.passthrough.iter().map(Into::into));
     args.push("--".into());
-    args.extend(target.urls.iter().map(Into::into));
+    let list = matches!(action, Action::List { .. });
+    for url in &target.urls {
+        let playlist = if list { playlist_url(url) } else { None };
+        args.push(playlist.unwrap_or_else(|| url.clone()).into());
+    }
     Ok(args)
 }
 
@@ -332,6 +388,80 @@ mod tests {
         );
     }
 
+    fn protected(args: &[&str]) -> Vec<String> {
+        protect_video_ids(args.iter().map(Into::into).collect())
+            .into_iter()
+            .map(|arg| arg.into_string().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn dashed_video_ids_become_urls() {
+        assert_eq!(
+            protected(&["ytd", "get", "-jAq6qRM4nk", "--a_b-c_d-e"]),
+            [
+                "ytd",
+                "get",
+                "https://www.youtube.com/watch?v=-jAq6qRM4nk",
+                "https://www.youtube.com/watch?v=--a_b-c_d-e"
+            ]
+        );
+    }
+
+    #[test]
+    fn other_arguments_are_not_treated_as_video_ids() {
+        for args in [
+            &["ytd", "get", "--audio", "--dir", "/d", "V0pxDS3dpWg"][..],
+            &["ytd", "get", "-abcdefghi"],
+            &["ytd", "get", "-abcdefghijk"],
+            &["ytd", "get", "-abcdefghi!"],
+            &["ytd", "get", "u1", "--", "-jAq6qRM4nk"],
+        ] {
+            assert_eq!(protected(args), args);
+        }
+    }
+
+    #[test]
+    fn extracts_playlist_from_youtube_urls() {
+        let expected = Some(format!("{PLAYLIST_URL}PLabc-d_e"));
+        for url in [
+            "https://www.youtube.com/watch?v=x1&list=PLabc-d_e&pp=y",
+            "https://www.youtube.com/watch?list=PLabc-d_e",
+            "https://www.youtube.com/playlist?list=PLabc-d_e",
+            "https://music.youtube.com/watch?v=x1&list=PLabc-d_e#top",
+            "https://youtu.be/x1?list=PLabc-d_e",
+            "http://m.youtube.com/watch?v=x1&list=PLabc-d_e",
+        ] {
+            assert_eq!(playlist_url(url), expected, "{url}");
+        }
+    }
+
+    #[test]
+    fn leaves_urls_without_a_youtube_playlist_alone() {
+        for url in [
+            "PLabc-d_e",
+            "https://www.youtube.com/watch?v=x1",
+            "https://www.youtube.com/watch?v=x1&list=",
+            "https://www.youtube.com/watch?v=x1&list=RDx1",
+            "https://www.youtube.com/watch?v=x1&playlist=PLa",
+            "https://www.youtube.com/@channel",
+            "https://example.com/watch?list=PLa",
+            "https://notyoutube.com/watch?list=PLa",
+        ] {
+            assert_eq!(playlist_url(url), None, "{url}");
+        }
+    }
+
+    #[test]
+    fn only_list_extracts_the_playlist() {
+        let url = "https://www.youtube.com/watch?v=x1&list=PLa";
+        assert_eq!(built(&["get", url]).last().unwrap(), url);
+        assert_eq!(
+            built(&["list", url]).last().unwrap(),
+            "https://www.youtube.com/playlist?list=PLa"
+        );
+    }
+
     #[test]
     fn missing_config_explains_how_to_create_one() {
         let message = missing_config(Path::new("/x/etc/ytd.toml"));
@@ -377,6 +507,7 @@ mod tests {
                 "/downloads",
                 "--output",
                 "%(id)s.%(ext)s",
+                "--no-playlist",
                 "--no-mtime",
                 "--",
                 "https://example.com/a"
@@ -393,6 +524,7 @@ mod tests {
                 "/music",
                 "--output",
                 "%(id)s.%(ext)s",
+                "--no-playlist",
                 "--extract-audio",
                 "--no-mtime",
                 "-q",
@@ -404,15 +536,29 @@ mod tests {
     }
 
     #[test]
-    fn list_prints_playlist_entries_without_download_options() {
+    fn list_defaults_to_json_without_download_options() {
         assert_eq!(
             built(&["list", "u1", "--", "-q"]),
+            [
+                "--flat-playlist",
+                "--dump-single-json",
+                "--no-mtime",
+                "-q",
+                "--",
+                "u1"
+            ]
+        );
+    }
+
+    #[test]
+    fn list_text_prints_a_line_per_video() {
+        assert_eq!(
+            built(&["list", "--text", "u1"]),
             [
                 "--flat-playlist",
                 "--print",
                 "%(title)s [%(id)s]",
                 "--no-mtime",
-                "-q",
                 "--",
                 "u1"
             ]

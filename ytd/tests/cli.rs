@@ -72,7 +72,7 @@ fn downloads_with_configured_settings() {
         .success();
     assert_eq!(
         fixture.recorded(),
-        "--paths\n/downloads\n--output\n%(id)s\n--\nhttps://example.com/a\n"
+        "--paths\n/downloads\n--output\n%(id)s\n--no-playlist\n--\nhttps://example.com/a\n"
     );
 }
 
@@ -94,7 +94,7 @@ fn passes_options_through() {
         .success();
     assert_eq!(
         fixture.recorded(),
-        "--paths\n/music\n--output\n%(id)s\n--extract-audio\n--no-mtime\n--\nu1\n"
+        "--paths\n/music\n--output\n%(id)s\n--no-playlist\n--extract-audio\n--no-mtime\n--\nu1\n"
     );
 }
 
@@ -185,7 +185,7 @@ fn lists_playlist_entries() {
         .success();
     assert_eq!(
         fixture.recorded(),
-        "--flat-playlist\n--print\n%(title)s [%(id)s]\n--\nhttps://example.com/playlist\n"
+        "--flat-playlist\n--dump-single-json\n--\nhttps://example.com/playlist\n"
     );
 }
 
@@ -275,7 +275,7 @@ fn expands_configured_alias() {
     fixture.run().args(["m", "u1"]).assert().success();
     assert_eq!(
         fixture.recorded(),
-        "--paths\n/music\n--output\n%(id)s\n--extract-audio\n--\nu1\n"
+        "--paths\n/music\n--output\n%(id)s\n--no-playlist\n--extract-audio\n--\nu1\n"
     );
 }
 
@@ -356,4 +356,57 @@ fn init_can_be_reached_through_an_alias() {
         .assert()
         .success()
         .stdout(predicate::str::starts_with("# ytd configuration."));
+}
+
+#[test]
+fn accepts_video_id_starting_with_a_dash() {
+    let fixture = fixture();
+    fixture
+        .run()
+        .args(["get", "-jAq6qRM4nk"])
+        .assert()
+        .success();
+    assert!(
+        fixture
+            .recorded()
+            .ends_with("--\nhttps://www.youtube.com/watch?v=-jAq6qRM4nk\n")
+    );
+}
+
+#[test]
+fn accepts_dashed_video_id_after_an_alias() {
+    let fixture = fixture();
+    fixture.add_config("[aliases]\nhd = \"get -- --format best\"\n");
+    fixture.run().args(["hd", "-jAq6qRM4nk"]).assert().success();
+    assert!(
+        fixture
+            .recorded()
+            .ends_with("--format\nbest\n--\nhttps://www.youtube.com/watch?v=-jAq6qRM4nk\n")
+    );
+}
+
+#[test]
+fn mistyped_option_is_still_an_error() {
+    fixture()
+        .run()
+        .args(["get", "--audoi", "u1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unexpected argument"));
+}
+
+#[test]
+fn list_extracts_playlist_from_video_url() {
+    let fixture = fixture();
+    fixture
+        .run()
+        .args([
+            "list",
+            "https://www.youtube.com/watch?v=ajHK8gJcS_U&list=PLBM6cXvJ9jZShrKjJPWs8DxzND8c12u-t&pp=0gcJCR0Ga94AFGB0",
+        ])
+        .assert()
+        .success();
+    assert!(fixture.recorded().ends_with(
+        "--\nhttps://www.youtube.com/playlist?list=PLBM6cXvJ9jZShrKjJPWs8DxzND8c12u-t\n"
+    ));
 }

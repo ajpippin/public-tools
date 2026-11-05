@@ -17,7 +17,7 @@ ytd init > "$XDG_CONFIG_HOME/etc/ytd.toml"
 
 ```text
 ytd get [--dir DIR] [--audio] <url>... [-- <yt-dlp argument>...]
-ytd list <url>... [-- <yt-dlp argument>...]
+ytd list [--text] <url>... [-- <yt-dlp argument>...]
 ytd init
 ytd --version
 ```
@@ -27,10 +27,23 @@ commit that was built (or `dev`) and the 7-character commit SHA, such as
 `ytd dev aa1af73`.
 
 `get` downloads each URL. `--dir` replaces the configured download directory,
-and `--audio` extracts the audio only.
+and `--audio` extracts the audio only. A video URL within a playlist downloads
+only that video, and a playlist URL still downloads the playlist. Add
+`-- --yes-playlist` to download the whole playlist from a video URL.
 
-`list` prints the title and ID of each video in a playlist or channel, without
-downloading anything. A URL for a single video prints one line.
+`list` prints a playlist or channel as JSON, using yt-dlp's `--flat-playlist` and
+`--dump-single-json`, without downloading anything. It prints one JSON document
+per URL. `--text` prints a `title [id]` line per video instead.
+
+`list` also takes the URL of a video within a playlist, such as one with
+`watch?v=...&list=...`, and lists the playlist from its `list=` value. Quote a
+URL like that, because the shell treats `?` and `&` as special characters.
+
+Playlists can include videos that yt-dlp returns with only an `id` and
+`url`. Those have no `title` in the JSON, and `--text` shows them as `NA`.
+
+A URL can be a bare YouTube video ID. An 11-character ID that starts with `-` is
+turned into a full URL, so that it isn't read as an option.
 
 `init` prints a default configuration file to stdout, with every setting
 commented out. It neither reads nor writes the configuration, so it works when
