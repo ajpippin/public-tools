@@ -1,4 +1,5 @@
 use crate::config::{self, Config};
+use crate::transcript;
 use anyhow::{Context, Result, bail};
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use std::collections::BTreeMap;
@@ -32,7 +33,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Action {
-    /// Download videos or audio.
+    /// Download videos, audio, or transcripts.
     Get {
         #[arg(
             long,
@@ -40,8 +41,18 @@ enum Action {
             help = "Override the configured download directory"
         )]
         dir: Option<PathBuf>,
-        #[arg(long, help = "Extract the audio only")]
+        #[arg(long, conflicts_with = "transcript", help = "Extract the audio only")]
         audio: bool,
+        #[arg(long, help = "Save the captions as plain text, without the video")]
+        transcript: bool,
+        #[arg(
+            long,
+            value_name = "LANGS",
+            default_value = "en",
+            requires = "transcript",
+            help = "Transcript languages, as yt-dlp's --sub-langs takes them"
+        )]
+        lang: String,
         #[command(flatten)]
         target: Target,
     },
@@ -92,9 +103,10 @@ pub fn run() -> Result<()> {
         print!("{}", config::STARTER);
         return Ok(());
     }
+    let scratch = tempfile::tempdir().context("create temporary directory")?;
     let binary = &settings.yt_dlp_binary;
     let status = Command::new(binary)
-        .args(arguments(&cli.command, &settings)?)
+        .args(arguments(&cli.command, &settings, scratch.path())?)
         .envs(
             settings
                 .env
@@ -105,6 +117,16 @@ pub fn run() -> Result<()> {
         .with_context(|| format!("run {binary}"))?;
     if !status.success() {
         bail!("{binary} failed: {status}");
+    }
+    if let Action::Get {
+        dir,
+        transcript: true,
+        ..
+    } = &cli.command
+    {
+        for path in transcript::save(scratch.path(), &output_dir(dir, &settings)?)? {
+            println!("{}", path.display());
+        }
     }
     Ok(())
 }
@@ -231,13 +253,28 @@ fn playlist_url(url: &str) -> Option<String> {
         .map(|id| format!("{PLAYLIST_URL}{id}"))
 }
 
-fn arguments(action: &Action, settings: &Config) -> Result<Vec<OsString>> {
+fn output_dir(dir: &Option<PathBuf>, settings: &Config) -> Result<PathBuf> {
+    match dir {
+        // An alias reaches here without the shell having expanded it.
+        Some(dir) => config::expand_home(dir.clone()),
+        None => Ok(settings.download_dir.clone()),
+    }
+}
+
+fn arguments(action: &Action, settings: &Config, scratch: &Path) -> Result<Vec<OsString>> {
     let (mut args, target): (Vec<OsString>, _) = match action {
-        Action::Get { dir, audio, target } => {
-            // An alias reaches here without the shell having expanded it.
-            let dir = match dir {
-                Some(dir) => config::expand_home(dir.clone())?,
-                None => settings.download_dir.clone(),
+        Action::Get {
+            dir,
+            audio,
+            transcript,
+            lang,
+            target,
+        } => {
+            // A transcript is converted from captions kept in scratch.
+            let dir = if *transcript {
+                scratch.to_path_buf()
+            } else {
+                output_dir(dir, settings)?
             };
             let mut args = vec![
                 "--paths".into(),
@@ -248,6 +285,17 @@ fn arguments(action: &Action, settings: &Config) -> Result<Vec<OsString>> {
             ];
             if *audio {
                 args.push("--extract-audio".into());
+            }
+            if *transcript {
+                args.extend([
+                    "--skip-download".into(),
+                    "--write-subs".into(),
+                    "--write-auto-subs".into(),
+                    "--sub-langs".into(),
+                    lang.into(),
+                    "--convert-subs".into(),
+                    "srt".into(),
+                ]);
             }
             (args, target)
         }
@@ -290,7 +338,7 @@ mod tests {
 
     fn built(args: &[&str]) -> Vec<String> {
         let cli = Cli::try_parse_from([&["ytd"], args].concat()).unwrap();
-        arguments(&cli.command, &settings())
+        arguments(&cli.command, &settings(), Path::new("/scratch"))
             .unwrap()
             .into_iter()
             .map(|arg| arg.into_string().unwrap())
@@ -548,6 +596,58 @@ mod tests {
                 "u1"
             ]
         );
+    }
+
+    #[test]
+    fn get_transcript_fetches_captions_into_scratch_without_the_video() {
+        assert_eq!(
+            built(&[
+                "get",
+                "--transcript",
+                "--lang",
+                "fr",
+                "--dir",
+                "/d",
+                "u1",
+                "--",
+                "-q"
+            ]),
+            [
+                "--paths",
+                "/scratch",
+                "--output",
+                "%(id)s.%(ext)s",
+                "--no-playlist",
+                "--skip-download",
+                "--write-subs",
+                "--write-auto-subs",
+                "--sub-langs",
+                "fr",
+                "--convert-subs",
+                "srt",
+                "--no-mtime",
+                "-q",
+                "--",
+                "u1"
+            ]
+        );
+        assert!(built(&["get", "--transcript", "u1"]).contains(&"en".to_owned()));
+    }
+
+    #[test]
+    fn get_without_transcript_requests_no_captions() {
+        assert!(!built(&["get", "u1"]).contains(&"--write-subs".to_owned()));
+    }
+
+    #[test]
+    fn transcript_options_are_checked() {
+        for args in [
+            &["ytd", "get", "--audio", "--transcript", "u1"][..],
+            &["ytd", "get", "--lang", "fr", "u1"],
+            &["ytd", "list", "--transcript", "u1"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
     }
 
     #[test]

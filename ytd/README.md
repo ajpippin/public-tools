@@ -16,13 +16,13 @@ ytd init > "$XDG_CONFIG_HOME/etc/ytd.toml"
 ```
 
 ```text
-ytd get [--dir DIR] [--audio] <url>... [-- <yt-dlp argument>...]
+ytd get [--dir DIR] [--audio | --transcript [--lang LANGS]] <url>... [-- <yt-dlp argument>...]
 ytd list [--text] <url>... [-- <yt-dlp argument>...]
 ytd init
 ytd --version
 ```
 
-Both commands accept `--config FILE`. `--version` prints the Git tag on the
+Every command accepts `--config FILE`. `--version` prints the Git tag on the
 commit that was built (or `dev`) and the 7-character commit SHA, such as
 `ytd dev aa1af73`.
 
@@ -41,6 +41,14 @@ URL like that, because the shell treats `?` and `&` as special characters.
 
 Playlists can include videos that yt-dlp returns with only an `id` and
 `url`. Those have no `title` in the JSON, and `--text` shows them as `NA`.
+
+`get --transcript` saves a video's captions as plain text instead of downloading
+the video, without the timings or the repeated lines of auto-generated captions,
+and prints each file's path. The file goes in the download directory, as
+`<name>.<language>.txt`. It uses uploaded captions when a video has them, and
+auto-generated ones otherwise. `--lang` defaults to `en` and takes what yt-dlp's
+`--sub-langs` takes, such as `en.*` or `en,fr`. It stops with an error if nothing
+is available.
 
 A URL can be a bare YouTube video ID. An 11-character ID that starts with `-` is
 turned into a full URL, so that it isn't read as an option.
@@ -76,6 +84,7 @@ extra_args = ["--embed-metadata"]
 music = "get --audio --dir ~/Music"
 "get hd" = "get -- --format bestvideo[height<=1080]+bestaudio"
 ls = "list"
+transcript = "get --transcript"
 
 [env]
 HTTPS_PROXY = "http://proxy.example.com:8080"

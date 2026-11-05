@@ -8,14 +8,14 @@ struct Fixture {
     config: PathBuf,
 }
 
-// A fake yt-dlp that records its arguments and environment, and exits with
-// FAKE_EXIT.
+// A fake yt-dlp that records its arguments and environment, writes FAKE_SRT as
+// a subtitle file under its --paths directory, and exits with FAKE_EXIT.
 fn fixture() -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let binary = dir.path().join("yt-dlp");
     std::fs::write(
         &binary,
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.args\"\nenv > \"$0.env\"\nexit \"${FAKE_EXIT:-0}\"\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.args\"\nenv > \"$0.env\"\nif [ -n \"$FAKE_SRT\" ]; then printf '%s' \"$FAKE_SRT\" > \"$2/Title [id].en.srt\"; fi\nexit \"${FAKE_EXIT:-0}\"\n",
     )
     .unwrap();
     std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -409,4 +409,71 @@ fn list_extracts_playlist_from_video_url() {
     assert!(fixture.recorded().ends_with(
         "--\nhttps://www.youtube.com/playlist?list=PLBM6cXvJ9jZShrKjJPWs8DxzND8c12u-t\n"
     ));
+}
+
+const SRT: &str = "1\n00:00:01,000 --> 00:00:02,000\nHello there\n\n2\n00:00:02,000 --> 00:00:03,000\nHello there\nand welcome\n";
+
+#[test]
+fn transcript_saves_plain_text_and_prints_its_path() {
+    let fixture = fixture();
+    let dir = fixture.dir.path().join("out");
+    let text = dir.join("Title [id].en.txt");
+    fixture
+        .run()
+        .env("FAKE_SRT", SRT)
+        .args(["get", "--transcript", "--dir"])
+        .arg(&dir)
+        .arg("https://example.com/a")
+        .assert()
+        .success()
+        .stdout(format!("{}\n", text.display()));
+    assert_eq!(
+        std::fs::read_to_string(text).unwrap(),
+        "Hello there and welcome\n"
+    );
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    assert!(fixture.recorded().contains("--skip-download\n"));
+}
+
+#[test]
+fn transcript_reports_when_there_are_no_captions() {
+    let fixture = fixture();
+    let dir = fixture.dir.path().join("out");
+    fixture
+        .run()
+        .args(["get", "--transcript", "--dir"])
+        .arg(&dir)
+        .arg("u1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no transcript available"));
+    assert!(!dir.exists());
+}
+
+#[test]
+fn transcript_reports_yt_dlp_failure() {
+    let fixture = fixture();
+    fixture
+        .run()
+        .env("FAKE_EXIT", "3")
+        .args(["get", "--transcript", "u1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("failed: exit status: 3"));
+}
+
+#[test]
+fn transcript_can_be_reached_through_an_alias() {
+    let fixture = fixture();
+    fixture.add_config("[aliases]\ntranscript = \"get --transcript\"\n");
+    let dir = fixture.dir.path().join("out");
+    fixture
+        .run()
+        .env("FAKE_SRT", SRT)
+        .args(["transcript", "--lang", "en", "--dir"])
+        .arg(&dir)
+        .arg("u1")
+        .assert()
+        .success();
+    assert!(dir.join("Title [id].en.txt").exists());
 }
