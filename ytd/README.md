@@ -16,7 +16,7 @@ ytd init > "$XDG_CONFIG_HOME/etc/ytd.toml"
 ```
 
 ```text
-ytd get [--dir DIR] [--type TYPES] [--audio] [--transcript] [--lang LANGS] <url>... [-- <yt-dlp argument>...]
+ytd get [--dir DIR] [--type TYPES] [--video] [--audio] [--transcript] [--lang LANGS] <url>... [-- <yt-dlp argument>...]
 ytd list [--text] <url>... [-- <yt-dlp argument>...]
 ytd init
 ytd --version
@@ -37,9 +37,9 @@ commas or given as repeated `--type` options:
 | `txt` | The captions, as plain text                                   |
 | `all` | All three                                                     |
 
-`--audio` is the same as `--type mp3`, and `--transcript` is the same as
-`--type txt`. They add to `--type`, so `--audio --transcript` saves the audio and
-the captions. Each type is a separate yt-dlp run, in the order `mp4`, `mp3`,
+`--video` is the same as `--type mp4`, `--audio` is the same as `--type mp3`, and
+`--transcript` is the same as `--type txt`. They add to `--type`, so
+`--audio --transcript` saves the audio and the captions. Each type is a separate yt-dlp run, in the order `mp4`, `mp3`,
 `txt`, and `ytd` stops at the first run that fails. The arguments after `--` go
 to every run.
 

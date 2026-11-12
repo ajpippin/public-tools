@@ -51,6 +51,8 @@ enum Action {
             help = "What to save: mp4, mp3, txt, or all, comma-separated [default: mp4]"
         )]
         types: Vec<Kind>,
+        #[arg(long, help = "Save the video as MP4, the same as --type mp4")]
+        video: bool,
         #[arg(long, help = "Save the audio as MP3, the same as --type mp3")]
         audio: bool,
         #[arg(long, help = "Save the captions as plain text, the same as --type txt")]
@@ -187,11 +189,12 @@ fn extract_audio(ffmpeg: &str, videos: &Path) -> Result<()> {
     Ok(())
 }
 
-// What get saves, in download order. --audio and --transcript add to --type,
-// and nothing chosen means the video.
+// What get saves, in download order. --video, --audio, and --transcript add to
+// --type, and nothing chosen means the video.
 fn kinds(action: &Action) -> Result<Vec<Kind>> {
     let Action::Get {
         types,
+        video,
         audio,
         transcript,
         lang,
@@ -207,6 +210,9 @@ fn kinds(action: &Action) -> Result<Vec<Kind>> {
             kind => vec![*kind],
         })
         .collect();
+    if *video {
+        kinds.insert(Kind::Mp4);
+    }
     if *audio {
         kinds.insert(Kind::Mp3);
     }
@@ -848,6 +854,12 @@ mod tests {
         assert_eq!(
             kinds_run(&["get", "--type", "mp4", "--audio", "u1"]),
             [both]
+        );
+        assert_eq!(kinds_run(&["get", "--video", "u1"]), [video]);
+        assert_eq!(kinds_run(&["get", "--video", "--audio", "u1"]), [both]);
+        assert_eq!(
+            kinds_run(&["get", "--video", "--type", "txt", "u1"]),
+            [video, text]
         );
     }
 

@@ -99,6 +99,7 @@
   the video as MP4.
 - Made `ytd get --type mp4,mp3` download the video once and extract the MP3 from
   it with ffmpeg, set by the new `ffmpeg_binary` setting.
+- Added `ytd get --video`, the same as `--type mp4`.
 
 ## Build system
 
