@@ -1,10 +1,11 @@
 use crate::config::{self, Config};
 use crate::transcript;
 use anyhow::{Context, Result, bail};
-use clap::{Args, CommandFactory, Parser, Subcommand};
-use std::collections::BTreeMap;
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::ffi::OsString;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -12,6 +13,8 @@ const LIST_TEMPLATE: &str = "%(title)s [%(id)s]";
 const VIDEO_URL: &str = "https://www.youtube.com/watch?v=";
 const PLAYLIST_URL: &str = "https://www.youtube.com/playlist?list=";
 const COMMANDS: [&str; 4] = ["get", "init", "list", "help"];
+// Under scratch, the videos that yt-dlp saved, for extracting their audio.
+const VIDEOS: &str = "videos";
 
 #[derive(Parser)]
 #[command(
@@ -41,18 +44,23 @@ enum Action {
             help = "Override the configured download directory"
         )]
         dir: Option<PathBuf>,
-        #[arg(long, conflicts_with = "transcript", help = "Extract the audio only")]
+        #[arg(
+            long = "type",
+            value_name = "TYPES",
+            value_delimiter = ',',
+            help = "What to save: mp4, mp3, txt, or all, comma-separated [default: mp4]"
+        )]
+        types: Vec<Kind>,
+        #[arg(long, help = "Save the audio as MP3, the same as --type mp3")]
         audio: bool,
-        #[arg(long, help = "Save the captions as plain text, without the video")]
+        #[arg(long, help = "Save the captions as plain text, the same as --type txt")]
         transcript: bool,
         #[arg(
             long,
             value_name = "LANGS",
-            default_value = "en",
-            requires = "transcript",
-            help = "Transcript languages, as yt-dlp's --sub-langs takes them"
+            help = "Transcript languages, as yt-dlp's --sub-langs takes them [default: en]"
         )]
-        lang: String,
+        lang: Option<String>,
         #[command(flatten)]
         target: Target,
     },
@@ -65,6 +73,19 @@ enum Action {
         #[command(flatten)]
         target: Target,
     },
+}
+
+// The order here is the order of the downloads.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum Kind {
+    #[value(help = "The video, as MP4")]
+    Mp4,
+    #[value(help = "The audio, as MP3")]
+    Mp3,
+    #[value(help = "The captions, as plain text")]
+    Txt,
+    #[value(help = "All three")]
+    All,
 }
 
 #[derive(Args)]
@@ -105,30 +126,100 @@ pub fn run() -> Result<()> {
     }
     let scratch = tempfile::tempdir().context("create temporary directory")?;
     let binary = &settings.yt_dlp_binary;
-    let status = Command::new(binary)
-        .args(arguments(&cli.command, &settings, scratch.path())?)
-        .envs(
-            settings
-                .env
-                .iter()
-                .filter(|(name, _)| env::var_os(name).is_none()),
-        )
-        .status()
-        .with_context(|| format!("run {binary}"))?;
-    if !status.success() {
-        bail!("{binary} failed: {status}");
+    for args in invocations(&cli.command, &settings, scratch.path())? {
+        let status = Command::new(binary)
+            .args(args)
+            .envs(
+                settings
+                    .env
+                    .iter()
+                    .filter(|(name, _)| env::var_os(name).is_none()),
+            )
+            .status()
+            .with_context(|| format!("run {binary}"))?;
+        if !status.success() {
+            bail!("{binary} failed: {status}");
+        }
     }
-    if let Action::Get {
-        dir,
-        transcript: true,
-        ..
-    } = &cli.command
+    let kinds = kinds(&cli.command)?;
+    if extracts_audio(&kinds) {
+        extract_audio(&settings.ffmpeg_binary, &scratch.path().join(VIDEOS))?;
+    }
+    if let Action::Get { dir, .. } = &cli.command
+        && kinds.contains(&Kind::Txt)
     {
         for path in transcript::save(scratch.path(), &output_dir(dir, &settings)?)? {
             println!("{}", path.display());
         }
     }
     Ok(())
+}
+
+// With both the video and the audio wanted, the audio comes from the
+// downloaded video rather than a second download.
+fn extracts_audio(kinds: &[Kind]) -> bool {
+    kinds.contains(&Kind::Mp4) && kinds.contains(&Kind::Mp3)
+}
+
+// Saves the audio of each video listed in `videos` as MP3 beside it, with the
+// quality yt-dlp's --audio-format mp3 gives by default.
+fn extract_audio(ffmpeg: &str, videos: &Path) -> Result<()> {
+    let list = fs::read_to_string(videos).unwrap_or_default();
+    let mut paths: Vec<&str> = list.lines().filter(|line| !line.is_empty()).collect();
+    paths.dedup();
+    if paths.is_empty() {
+        bail!("no video downloaded to extract the audio from");
+    }
+    for video in paths {
+        let audio = Path::new(video).with_extension("mp3");
+        let status = Command::new(ffmpeg)
+            .args(["-nostdin", "-loglevel", "error", "-y", "-i"])
+            .arg(video)
+            .args(["-vn", "-codec:a", "libmp3lame", "-q:a", "5"])
+            .arg(&audio)
+            .status()
+            .with_context(|| format!("run {ffmpeg}"))?;
+        if !status.success() {
+            bail!("{ffmpeg} failed: {status}");
+        }
+        println!("{}", audio.display());
+    }
+    Ok(())
+}
+
+// What get saves, in download order. --audio and --transcript add to --type,
+// and nothing chosen means the video.
+fn kinds(action: &Action) -> Result<Vec<Kind>> {
+    let Action::Get {
+        types,
+        audio,
+        transcript,
+        lang,
+        ..
+    } = action
+    else {
+        return Ok(vec![]);
+    };
+    let mut kinds: BTreeSet<Kind> = types
+        .iter()
+        .flat_map(|kind| match kind {
+            Kind::All => vec![Kind::Mp4, Kind::Mp3, Kind::Txt],
+            kind => vec![*kind],
+        })
+        .collect();
+    if *audio {
+        kinds.insert(Kind::Mp3);
+    }
+    if *transcript {
+        kinds.insert(Kind::Txt);
+    }
+    if kinds.is_empty() {
+        kinds.insert(Kind::Mp4);
+    }
+    if lang.is_some() && !kinds.contains(&Kind::Txt) {
+        bail!("--lang needs --type txt or --transcript");
+    }
+    Ok(kinds.into_iter().collect())
 }
 
 fn missing_config(path: &Path) -> String {
@@ -261,43 +352,31 @@ fn output_dir(dir: &Option<PathBuf>, settings: &Config) -> Result<PathBuf> {
     }
 }
 
-fn arguments(action: &Action, settings: &Config, scratch: &Path) -> Result<Vec<OsString>> {
-    let (mut args, target): (Vec<OsString>, _) = match action {
+// The yt-dlp arguments for each run: one for list, and one per kind for get.
+fn invocations(action: &Action, settings: &Config, scratch: &Path) -> Result<Vec<Vec<OsString>>> {
+    let (runs, target): (Vec<Vec<OsString>>, _) = match action {
         Action::Get {
-            dir,
-            audio,
-            transcript,
-            lang,
-            target,
+            dir, lang, target, ..
         } => {
-            // A transcript is converted from captions kept in scratch.
-            let dir = if *transcript {
-                scratch.to_path_buf()
-            } else {
-                output_dir(dir, settings)?
-            };
-            let mut args = vec![
-                "--paths".into(),
-                dir.into(),
-                "--output".into(),
-                (&settings.output_template).into(),
-                "--no-playlist".into(),
-            ];
-            if *audio {
-                args.push("--extract-audio".into());
-            }
-            if *transcript {
-                args.extend([
-                    "--skip-download".into(),
-                    "--write-subs".into(),
-                    "--write-auto-subs".into(),
-                    "--sub-langs".into(),
-                    lang.into(),
-                    "--convert-subs".into(),
-                    "srt".into(),
-                ]);
-            }
-            (args, target)
+            let dir = output_dir(dir, settings)?;
+            let kinds = kinds(action)?;
+            let extract = extracts_audio(&kinds);
+            let runs = kinds
+                .into_iter()
+                .filter(|kind| !(extract && *kind == Kind::Mp3))
+                .map(|kind| {
+                    let mut args = get_arguments(kind, &dir, lang, settings, scratch);
+                    if extract && kind == Kind::Mp4 {
+                        args.extend([
+                            "--print-to-file".into(),
+                            "after_move:filepath".into(),
+                            scratch.join(VIDEOS).into(),
+                        ]);
+                    }
+                    args
+                })
+                .collect();
+            (runs, target)
         }
         Action::Init => unreachable!("init runs no yt-dlp command"),
         Action::List { text, target } => {
@@ -307,18 +386,65 @@ fn arguments(action: &Action, settings: &Config, scratch: &Path) -> Result<Vec<O
             } else {
                 args.push("--dump-single-json".into());
             }
-            (args, target)
+            (vec![args], target)
         }
     };
-    args.extend(settings.extra_args.iter().map(Into::into));
-    args.extend(target.passthrough.iter().map(Into::into));
-    args.push("--".into());
     let list = matches!(action, Action::List { .. });
-    for url in &target.urls {
-        let playlist = if list { playlist_url(url) } else { None };
-        args.push(playlist.unwrap_or_else(|| url.clone()).into());
+    Ok(runs
+        .into_iter()
+        .map(|mut args| {
+            args.extend(settings.extra_args.iter().map(Into::into));
+            args.extend(target.passthrough.iter().map(Into::into));
+            args.push("--".into());
+            for url in &target.urls {
+                let playlist = if list { playlist_url(url) } else { None };
+                args.push(playlist.unwrap_or_else(|| url.clone()).into());
+            }
+            args
+        })
+        .collect())
+}
+
+fn get_arguments(
+    kind: Kind,
+    dir: &Path,
+    lang: &Option<String>,
+    settings: &Config,
+    scratch: &Path,
+) -> Vec<OsString> {
+    // A transcript is converted from captions kept in scratch.
+    let dir = if kind == Kind::Txt { scratch } else { dir };
+    let mut args = vec![
+        "--paths".into(),
+        dir.into(),
+        "--output".into(),
+        (&settings.output_template).into(),
+        "--no-playlist".into(),
+    ];
+    match kind {
+        Kind::Mp4 => args.extend([
+            "--merge-output-format".into(),
+            "mp4".into(),
+            "--remux-video".into(),
+            "mp4".into(),
+        ]),
+        Kind::Mp3 => args.extend([
+            "--extract-audio".into(),
+            "--audio-format".into(),
+            "mp3".into(),
+        ]),
+        Kind::Txt => args.extend([
+            "--skip-download".into(),
+            "--write-subs".into(),
+            "--write-auto-subs".into(),
+            "--sub-langs".into(),
+            lang.as_deref().unwrap_or("en").into(),
+            "--convert-subs".into(),
+            "srt".into(),
+        ]),
+        Kind::All => unreachable!("all is split into its kinds"),
     }
-    Ok(args)
+    args
 }
 
 #[cfg(test)]
@@ -328,6 +454,7 @@ mod tests {
     fn settings() -> Config {
         Config {
             yt_dlp_binary: "yt-dlp".into(),
+            ffmpeg_binary: "ffmpeg".into(),
             download_dir: "/downloads".into(),
             output_template: "%(id)s.%(ext)s".into(),
             extra_args: vec!["--no-mtime".into()],
@@ -336,12 +463,43 @@ mod tests {
         }
     }
 
-    fn built(args: &[&str]) -> Vec<String> {
+    fn runs(args: &[&str]) -> Result<Vec<Vec<String>>> {
         let cli = Cli::try_parse_from([&["ytd"], args].concat()).unwrap();
-        arguments(&cli.command, &settings(), Path::new("/scratch"))
+        Ok(
+            invocations(&cli.command, &settings(), Path::new("/scratch"))?
+                .into_iter()
+                .map(|run| {
+                    run.into_iter()
+                        .map(|arg| arg.into_string().unwrap())
+                        .collect()
+                })
+                .collect(),
+        )
+    }
+
+    fn built(args: &[&str]) -> Vec<String> {
+        let mut runs = runs(args).unwrap();
+        assert_eq!(runs.len(), 1);
+        runs.remove(0)
+    }
+
+    // The option that sets each run apart, such as --remux-video for mp4, or
+    // --print-to-file for mp4 with the audio extracted from it.
+    fn kinds_run(args: &[&str]) -> Vec<&'static str> {
+        runs(args)
             .unwrap()
-            .into_iter()
-            .map(|arg| arg.into_string().unwrap())
+            .iter()
+            .map(|run| {
+                [
+                    "--print-to-file",
+                    "--remux-video",
+                    "--extract-audio",
+                    "--skip-download",
+                ]
+                .into_iter()
+                .find(|option| run.iter().any(|arg| arg == option))
+                .unwrap()
+            })
             .collect()
     }
 
@@ -556,6 +714,10 @@ mod tests {
                 "--output",
                 "%(id)s.%(ext)s",
                 "--no-playlist",
+                "--merge-output-format",
+                "mp4",
+                "--remux-video",
+                "mp4",
                 "--no-mtime",
                 "--",
                 "https://example.com/a"
@@ -574,6 +736,8 @@ mod tests {
                 "%(id)s.%(ext)s",
                 "--no-playlist",
                 "--extract-audio",
+                "--audio-format",
+                "mp3",
                 "--no-mtime",
                 "-q",
                 "--",
@@ -641,12 +805,68 @@ mod tests {
 
     #[test]
     fn transcript_options_are_checked() {
-        for args in [
-            &["ytd", "get", "--audio", "--transcript", "u1"][..],
-            &["ytd", "get", "--lang", "fr", "u1"],
-            &["ytd", "list", "--transcript", "u1"],
-        ] {
-            assert!(Cli::try_parse_from(args).is_err());
+        assert!(Cli::try_parse_from(["ytd", "list", "--transcript", "u1"]).is_err());
+        assert!(Cli::try_parse_from(["ytd", "list", "--type", "mp3", "u1"]).is_err());
+        assert!(Cli::try_parse_from(["ytd", "get", "--type", "mkv", "u1"]).is_err());
+        assert!(runs(&["get", "--lang", "fr", "u1"]).is_err());
+        assert!(runs(&["get", "--type", "mp3", "--lang", "fr", "u1"]).is_err());
+        assert!(runs(&["get", "--type", "txt", "--lang", "fr", "u1"]).is_ok());
+    }
+
+    #[test]
+    fn video_run_lists_its_files_when_the_audio_is_extracted() {
+        let run = &runs(&["get", "--type", "mp4,mp3", "u1"]).unwrap()[0];
+        let at = run.iter().position(|arg| arg == "--print-to-file").unwrap();
+        assert_eq!(run[at + 1], "after_move:filepath");
+        assert_eq!(run[at + 2], "/scratch/videos");
+        assert!(!run.contains(&"--extract-audio".into()));
+    }
+
+    #[test]
+    fn type_chooses_what_get_saves() {
+        let video = "--remux-video";
+        let both = "--print-to-file";
+        let audio = "--extract-audio";
+        let text = "--skip-download";
+        assert_eq!(kinds_run(&["get", "u1"]), [video]);
+        assert_eq!(kinds_run(&["get", "--type", "mp3", "u1"]), [audio]);
+        assert_eq!(kinds_run(&["get", "--type=txt", "u1"]), [text]);
+        assert_eq!(
+            kinds_run(&["get", "--type", "txt,mp4", "u1"]),
+            [video, text]
+        );
+        assert_eq!(
+            kinds_run(&["get", "--type", "mp3", "--type", "mp4", "u1"]),
+            [both]
+        );
+        assert_eq!(kinds_run(&["get", "--type", "all", "u1"]), [both, text]);
+        assert_eq!(kinds_run(&["get", "--type", "all,mp3", "u1"]), [both, text]);
+        assert_eq!(
+            kinds_run(&["get", "--audio", "--transcript", "u1"]),
+            [audio, text]
+        );
+        assert_eq!(
+            kinds_run(&["get", "--type", "mp4", "--audio", "u1"]),
+            [both]
+        );
+    }
+
+    #[test]
+    fn each_run_downloads_every_url_with_the_passthrough() {
+        for run in runs(&[
+            "get", "--type", "all", "--dir", "/d", "u1", "u2", "--", "-q",
+        ])
+        .unwrap()
+        {
+            assert!(run.ends_with(&["-q".into(), "--".into(), "u1".into(), "u2".into()]));
+            assert_eq!(
+                run[1],
+                if run.contains(&"--skip-download".into()) {
+                    "/scratch"
+                } else {
+                    "/d"
+                }
+            );
         }
     }
 
@@ -681,5 +901,6 @@ mod tests {
     #[test]
     fn list_has_no_download_options() {
         assert!(Cli::try_parse_from(["ytd", "list", "--audio", "u1"]).is_err());
+        assert!(Cli::try_parse_from(["ytd", "list", "--lang", "en", "u1"]).is_err());
     }
 }

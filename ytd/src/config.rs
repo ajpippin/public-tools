@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 pub const STARTER: &str = "# ytd configuration. Uncomment and edit values to override defaults.\n\
 # A variable under [env] is used only if it is not already set in the environment.\n\
 # yt_dlp_binary = \"yt-dlp\"\n\
+# ffmpeg_binary = \"ffmpeg\"\n\
 # download_dir = \"~/Downloads\"\n\
 # output_template = \"%(title)s [%(id)s].%(ext)s\"\n\
 # extra_args = []\n\
@@ -20,6 +21,7 @@ pub const STARTER: &str = "# ytd configuration. Uncomment and edit values to ove
 #[derive(Clone, Debug)]
 pub struct Config {
     pub yt_dlp_binary: String,
+    pub ffmpeg_binary: String,
     pub download_dir: PathBuf,
     pub output_template: String,
     pub extra_args: Vec<String>,
@@ -51,6 +53,7 @@ fn path_in(xdg_config_home: Option<OsString>, home: Option<PathBuf>) -> Result<P
 pub fn defaults() -> Config {
     Config {
         yt_dlp_binary: "yt-dlp".into(),
+        ffmpeg_binary: "ffmpeg".into(),
         download_dir: dirs::home_dir().unwrap_or_default().join("Downloads"),
         output_template: "%(title)s [%(id)s].%(ext)s".into(),
         extra_args: vec![],
@@ -63,6 +66,7 @@ pub fn defaults() -> Config {
 #[serde(deny_unknown_fields)]
 struct ConfigFile {
     yt_dlp_binary: Option<String>,
+    ffmpeg_binary: Option<String>,
     download_dir: Option<PathBuf>,
     output_template: Option<String>,
     extra_args: Option<Vec<String>>,
@@ -77,6 +81,9 @@ pub fn load(path: &Path) -> Result<Config> {
         toml::from_str(&text).with_context(|| format!("parse config {:?}", path))?;
     if let Some(v) = file.yt_dlp_binary {
         settings.yt_dlp_binary = v;
+    }
+    if let Some(v) = file.ffmpeg_binary {
+        settings.ffmpeg_binary = v;
     }
     if let Some(v) = file.download_dir {
         settings.download_dir = v;
@@ -95,6 +102,9 @@ pub fn load(path: &Path) -> Result<Config> {
     }
     if settings.yt_dlp_binary.trim().is_empty() {
         bail!("config {:?} has an empty yt_dlp_binary", path);
+    }
+    if settings.ffmpeg_binary.trim().is_empty() {
+        bail!("config {:?} has an empty ffmpeg_binary", path);
     }
     if settings.download_dir.as_os_str().is_empty() {
         bail!("config {:?} has an empty download_dir", path);
@@ -192,6 +202,7 @@ mod tests {
     #[test]
     fn rejects_empty_settings() {
         assert!(load_error("yt_dlp_binary = ' '\n").ends_with("has an empty yt_dlp_binary"));
+        assert!(load_error("ffmpeg_binary = ''\n").ends_with("has an empty ffmpeg_binary"));
         assert!(load_error("download_dir = ''\n").ends_with("has an empty download_dir"));
         assert!(load_error("output_template = ' '\n").ends_with("has an empty output_template"));
     }
@@ -232,6 +243,7 @@ mod tests {
         let config = load(&path).unwrap();
         let expected = defaults();
         assert_eq!(config.yt_dlp_binary, expected.yt_dlp_binary);
+        assert_eq!(config.ffmpeg_binary, expected.ffmpeg_binary);
         assert_eq!(config.download_dir, expected.download_dir);
         assert_eq!(config.output_template, expected.output_template);
         assert_eq!(config.extra_args, expected.extra_args);
