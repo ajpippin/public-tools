@@ -1,0 +1,141 @@
+# CI on every push to every branch: lint, test & coverage, with Trivy
+# alongside it, then SonarQube once both have passed.
+#
+# The four tools are independent crates with no Cargo workspace, so the
+# top-level makefile runs each step once per tool. It finds the tools
+# through */Cargo.toml; this file doesn't, so a new tool must be added
+# to the target-directory cache below and to the coverage check in the
+# SonarQube job.
+#
+# Every job runs in a container, on GitHub-hosted ubuntu-latest unless
+# the RUNS_ON variable names other runners as JSON, e.g.
+# ["self-hosted","linux","x64"] (the LAN's SonarQube is only reachable
+# from there). Settings: SONAR_HOST_URL (variable) and SONAR_TOKEN
+# (secret).
+name: CI
+
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # rustfmt, Clippy, and every tool's tests under instrumentation, which
+  # writes coverage/<tool>.lcov with repo-relative paths for SonarQube.
+  lint-test:
+    name: Lint, test & coverage
+    runs-on: ${{ fromJSON(vars.RUNS_ON || '"ubuntu-latest"') }}
+    container:
+      image: rust:latest
+      # Docker's default open-files limit (1024 with containerd 2) can be
+      # too low for the builds and tests; 4096 is plenty.
+      options: --ulimit nofile=4096:4096
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: /usr/local/cargo/registry
+          key: cargo-registry-${{ hashFiles('*/Cargo.lock') }}
+          restore-keys: cargo-registry-
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ollama-shelf/target
+            template/target
+            topic/target
+            ytd/target
+          key: cargo-target-${{ hashFiles('*/Cargo.lock') }}
+          restore-keys: cargo-target-
+      - name: Install tools
+        run: |
+          rustup component add rustfmt clippy llvm-tools-preview
+          curl -fsSL "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-llvm-cov-$(uname -m)-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C "${CARGO_HOME:-$HOME/.cargo}/bin"
+      - name: Lint
+        run: make lint
+      # Replaces `make test`.
+      - name: Test & coverage
+        run: make coverage
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lcov
+          path: coverage/*.lcov
+
+  # Vulnerabilities, secrets and misconfigurations; fails on fixable HIGH
+  # or CRITICAL findings.
+  trivy:
+    name: Trivy Security Scan
+    runs-on: ${{ fromJSON(vars.RUNS_ON || '"ubuntu-latest"') }}
+    container: aquasec/trivy:0.74.0
+    steps:
+      # Alpine: no bash until it's installed, so this one step uses sh.
+      # GNU tar and zstd too: actions/cache can't save with BusyBox's tar.
+      - name: Install bash, tar and zstd
+        id: tools
+        shell: sh
+        run: |
+          apk add --no-cache bash tar zstd
+          echo "day=$(date -u +%Y-%m-%d)" >>"$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: .trivycache
+          key: trivy-${{ steps.tools.outputs.day }}
+          restore-keys: trivy-
+      - name: Trivy Security Scan
+        run: |
+          trivy fs --cache-dir .trivycache \
+            --skip-dirs .git --skip-dirs .trivycache --skip-dirs '**/target' --skip-dirs coverage \
+            --scanners vuln,secret,misconfig --severity HIGH,CRITICAL \
+            --ignore-unfixed --exit-code 1 .
+
+  # Imports Lint, test & coverage's LCOV reports and waits for the
+  # quality gate. Skipped without SONAR_HOST_URL (e.g. on GitHub-hosted
+  # runners, which can't reach it).
+  sonarqube:
+    name: SonarQube Analysis
+    needs: [lint-test, trivy]
+    if: vars.SONAR_HOST_URL != ''
+    runs-on: ${{ fromJSON(vars.RUNS_ON || '"ubuntu-latest"') }}
+    container:
+      image: sonarsource/sonar-scanner-cli:latest
+      # The image's own user (scanner-cli, uid 1000) can't write the
+      # runner's workspace, so checkout and the scanner run as root.
+      options: --user 0
+    env:
+      SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      # Full history for SCM blame -- a shallow clone leaves older files
+      # without blame information.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: day
+        run: echo "day=$(date -u +%Y-%m-%d)" >>"$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: /opt/sonar-scanner/.sonar
+          key: sonar-${{ steps.day.outputs.day }}
+          restore-keys: sonar-
+      - uses: actions/download-artifact@v8
+        with:
+          name: lcov
+          path: coverage
+      - name: SonarQube Analysis
+        run: |
+          # The clone belongs to the runner's user, not the container's,
+          # so git refuses it ("dubious ownership") and the secrets scan
+          # can't list files with it.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          for tool in ollama-shelf template topic ytd; do test -s "coverage/$tool.lcov"; done
+          sonar-scanner \
+            -Dsonar.host.url="${SONAR_HOST_URL}" \
+            -Dsonar.token="${SONAR_TOKEN}" \
+            -Dsonar.qualitygate.wait=true

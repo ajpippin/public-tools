@@ -50,6 +50,10 @@
   `check`, and `coverage` (per-tool LCOV reports via `cargo-llvm-cov`).
 - Added Bitbucket Pipelines: lint, test and coverage on every branch; Trivy
   scanning and SonarQube analysis with coverage and quality gate on `main`.
+- Moved CI from Bitbucket Pipelines to GitHub Actions
+  (`.github/workflows/ci.yml`), following the titletool workflow. Trivy and
+  SonarQube now run on every branch, runners are chosen by the `RUNS_ON`
+  variable, and SonarQube is skipped when `SONAR_HOST_URL` is unset.
 
 ## Test coverage
 
