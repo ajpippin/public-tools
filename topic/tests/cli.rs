@@ -160,7 +160,8 @@ impl Library {
             .envs(self.env())
             .env("VISUAL", self.path("bin/append-editor"))
             .env_remove("EDITOR")
-            .env_remove("TOPIC_CONFIG");
+            .env_remove("TOPIC_CONFIG")
+            .env_remove("XDG_CONFIG_HOME");
         command
     }
 

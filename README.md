@@ -104,22 +104,27 @@ templates.
 
 ## Configuration
 
-`ollama-shelf`, `template`, and `topic` keep their YAML configuration files
-together:
+The tools keep their configuration files together:
 
 ```text
 ~/.config/tools/
 ├── shelves.yaml
 ├── template.yaml
-└── topic.yaml
+├── topic.yaml
+└── ytd.toml
 ```
+
+Without an override, each tool uses the first of these that exists, and the
+first when none does: `$XDG_CONFIG_HOME/tools/<file>`, `~/.config/tools/<file>`,
+`$XDG_CONFIG_HOME/<file>`, then `~/.config/<file>`. `XDG_CONFIG_HOME` is skipped
+when it is unset, empty, or relative.
 
 Each binary automatically creates its missing configuration file with all
 built-in defaults shown as commented-out values. Existing files are never
 rewritten during startup. Each tool also supports its environment-variable and
 `--config` overrides.
 
-`ytd` uses TOML, in `$XDG_CONFIG_HOME/etc/ytd.toml`. It doesn't create that file:
+`ytd` uses TOML. It doesn't create its file:
 it stops with an error when the file is missing, and `ytd init` prints a default
 configuration to create it from.
 

@@ -118,6 +118,7 @@ impl Fixture {
             .env("OLLAMA_MODELS", self.dir.path().join("models"))
             .env_remove("OLLAMA_HOST_URL")
             .env_remove("OLLAMA_SHELF_CONFIG")
+            .env_remove("XDG_CONFIG_HOME")
             .args([
                 "--config",
                 self.dir.path().join("shelves.yaml").to_str().unwrap(),

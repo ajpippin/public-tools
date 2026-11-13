@@ -2,17 +2,22 @@
 
 A Rust wrapper around [yt-dlp](https://github.com/yt-dlp/yt-dlp), which must be
 installed separately. It applies a saved download directory, file name template,
-default options, and environment variables to each run. Configuration defaults
-to `$XDG_CONFIG_HOME/etc/ytd.toml`, or `~/.config/etc/ytd.toml` when
-`XDG_CONFIG_HOME` is unset, empty, or relative. `YTD_CONFIG` and `--config`
-provide overrides.
+default options, and environment variables to each run. `YTD_CONFIG` and
+`--config` choose the configuration file. Without an override, the configuration is the first of these that exists:
 
-The file is required. When it is missing, `ytd` stops with an error and shows
-how to create it:
+1. `$XDG_CONFIG_HOME/tools/ytd.toml`
+2. `~/.config/tools/ytd.toml`
+3. `$XDG_CONFIG_HOME/ytd.toml`
+4. `~/.config/ytd.toml`
+
+`XDG_CONFIG_HOME` is skipped when it is unset, empty, or relative.
+
+The file is required. When none of them exists, `ytd` stops with an error and
+shows how to create the first one, such as:
 
 ```sh
-mkdir -p "$XDG_CONFIG_HOME/etc"
-ytd init > "$XDG_CONFIG_HOME/etc/ytd.toml"
+mkdir -p ~/.config/tools
+ytd init > ~/.config/tools/ytd.toml
 ```
 
 ```text

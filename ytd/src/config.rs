@@ -36,18 +36,27 @@ pub fn default_path() -> Result<PathBuf> {
     path_in(env::var_os("XDG_CONFIG_HOME"), dirs::home_dir())
 }
 
+// The first of these that exists, or the first when none does:
+// $XDG_CONFIG_HOME/tools, ~/.config/tools, $XDG_CONFIG_HOME, then ~/.config.
 fn path_in(xdg_config_home: Option<OsString>, home: Option<PathBuf>) -> Result<PathBuf> {
     // The XDG specification says to ignore a relative XDG_CONFIG_HOME.
-    let base = match xdg_config_home
+    let xdg = xdg_config_home
         .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-    {
-        Some(path) => path,
-        None => home
-            .context("cannot determine home directory")?
-            .join(".config"),
-    };
-    Ok(base.join("etc/ytd.toml"))
+        .filter(|path| path.is_absolute());
+    let bases: Vec<PathBuf> = [xdg, home.map(|home| home.join(".config"))]
+        .into_iter()
+        .flatten()
+        .collect();
+    if bases.is_empty() {
+        bail!("cannot determine home directory");
+    }
+    let mut paths: Vec<PathBuf> = bases
+        .iter()
+        .map(|base| base.join("tools/ytd.toml"))
+        .collect();
+    paths.extend(bases.iter().map(|base| base.join("ytd.toml")));
+    let found = paths.iter().position(|path| path.exists()).unwrap_or(0);
+    Ok(paths.swap_remove(found))
 }
 
 pub fn defaults() -> Config {
@@ -154,14 +163,38 @@ mod tests {
     }
 
     #[test]
-    fn path_follows_xdg_config_home() {
-        let home = Some(PathBuf::from("/home/a"));
-        let path = |xdg: Option<&str>| path_in(xdg.map(Into::into), home.clone()).unwrap();
-        assert_eq!(path(Some("/xdg")), PathBuf::from("/xdg/etc/ytd.toml"));
-        let fallback = PathBuf::from("/home/a/.config/etc/ytd.toml");
-        assert_eq!(path(None), fallback);
-        assert_eq!(path(Some("")), fallback);
-        assert_eq!(path(Some("relative")), fallback);
+    fn path_lookup_prefers_tools_directories_and_xdg() {
+        let dir = tempfile::tempdir().unwrap();
+        let xdg = dir.path().join("xdg");
+        let home = dir.path().join("home");
+        let path = |xdg: Option<&Path>| {
+            path_in(xdg.map(|xdg| xdg.as_os_str().into()), Some(home.clone())).unwrap()
+        };
+        assert_eq!(path(Some(&xdg)), xdg.join("tools/ytd.toml"));
+        assert_eq!(path(None), home.join(".config/tools/ytd.toml"));
+        for value in ["", "relative"] {
+            assert_eq!(
+                path_in(Some(value.into()), Some(home.clone())).unwrap(),
+                home.join(".config/tools/ytd.toml")
+            );
+        }
+        // Each file created outranks the ones before it.
+        for expected in [
+            home.join(".config/ytd.toml"),
+            xdg.join("ytd.toml"),
+            home.join(".config/tools/ytd.toml"),
+            xdg.join("tools/ytd.toml"),
+        ] {
+            fs::create_dir_all(expected.parent().unwrap()).unwrap();
+            fs::write(&expected, "").unwrap();
+            assert_eq!(path(Some(&xdg)), expected);
+        }
+        assert_eq!(path(None), home.join(".config/tools/ytd.toml"));
+        assert!(path_in(None, None).is_err());
+        assert_eq!(
+            path_in(Some(xdg.as_os_str().into()), None).unwrap(),
+            xdg.join("tools/ytd.toml")
+        );
     }
 
     #[test]

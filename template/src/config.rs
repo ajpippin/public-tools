@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
+use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -30,9 +31,30 @@ pub fn default_path() -> Result<PathBuf> {
     if let Some(path) = env::var_os("TEMPLATE_CONFIG").filter(|value| !value.is_empty()) {
         return Ok(path.into());
     }
-    Ok(dirs::home_dir()
-        .context("cannot determine the home directory")?
-        .join(".config/tools/template.yaml"))
+    path_in(env::var_os("XDG_CONFIG_HOME"), dirs::home_dir())
+}
+
+// The first of these that exists, or the first when none does:
+// $XDG_CONFIG_HOME/tools, ~/.config/tools, $XDG_CONFIG_HOME, then ~/.config.
+fn path_in(xdg_config_home: Option<OsString>, home: Option<PathBuf>) -> Result<PathBuf> {
+    // The XDG specification says to ignore a relative XDG_CONFIG_HOME.
+    let xdg = xdg_config_home
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute());
+    let bases: Vec<PathBuf> = [xdg, home.map(|home| home.join(".config"))]
+        .into_iter()
+        .flatten()
+        .collect();
+    if bases.is_empty() {
+        bail!("cannot determine the home directory");
+    }
+    let mut paths: Vec<PathBuf> = bases
+        .iter()
+        .map(|base| base.join("tools/template.yaml"))
+        .collect();
+    paths.extend(bases.iter().map(|base| base.join("template.yaml")));
+    let found = paths.iter().position(|path| path.exists()).unwrap_or(0);
+    Ok(paths.swap_remove(found))
 }
 
 pub fn defaults() -> Config {
@@ -184,6 +206,41 @@ fn user_name() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn path_lookup_prefers_tools_directories_and_xdg() {
+        let dir = tempfile::tempdir().unwrap();
+        let xdg = dir.path().join("xdg");
+        let home = dir.path().join("home");
+        let path = |xdg: Option<&Path>| {
+            path_in(xdg.map(|xdg| xdg.as_os_str().into()), Some(home.clone())).unwrap()
+        };
+        assert_eq!(path(Some(&xdg)), xdg.join("tools/template.yaml"));
+        assert_eq!(path(None), home.join(".config/tools/template.yaml"));
+        for value in ["", "relative"] {
+            assert_eq!(
+                path_in(Some(value.into()), Some(home.clone())).unwrap(),
+                home.join(".config/tools/template.yaml")
+            );
+        }
+        // Each file created outranks the ones before it.
+        for expected in [
+            home.join(".config/template.yaml"),
+            xdg.join("template.yaml"),
+            home.join(".config/tools/template.yaml"),
+            xdg.join("tools/template.yaml"),
+        ] {
+            fs::create_dir_all(expected.parent().unwrap()).unwrap();
+            fs::write(&expected, "").unwrap();
+            assert_eq!(path(Some(&xdg)), expected);
+        }
+        assert_eq!(path(None), home.join(".config/tools/template.yaml"));
+        assert!(path_in(None, None).is_err());
+        assert_eq!(
+            path_in(Some(xdg.as_os_str().into()), None).unwrap(),
+            xdg.join("tools/template.yaml")
+        );
+    }
 
     #[test]
     fn loads_config() {
