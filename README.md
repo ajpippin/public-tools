@@ -63,17 +63,19 @@ component.
 
 ## Continuous integration
 
-`bitbucket-pipelines.yml` runs on the self-hosted runner:
+The GitHub Actions workflow `.github/workflows/ci.yml` runs on every push to
+every branch: lint, then tests with coverage; a Trivy filesystem scan
+(vulnerabilities, secrets, and misconfigurations; fails on fixable HIGH or
+CRITICAL findings) alongside them; then, once both pass, a SonarQube analysis
+that imports the LCOV coverage and waits for the quality gate.
 
-- **Every branch:** lint, then tests with coverage.
-- **`main`:** additionally runs a Trivy filesystem scan (vulnerabilities,
-  secrets, and misconfigurations; fails on fixable HIGH or CRITICAL findings)
-  and a SonarQube analysis that imports the LCOV coverage and waits for the
-  quality gate.
+Jobs run in containers on GitHub-hosted `ubuntu-latest` unless the `RUNS_ON`
+repository variable names other runners as JSON, such as
+`["self-hosted","linux","x64"]`.
 
-SonarQube settings are in `sonar-project.properties` (project key
-`PublicTools`). The pipeline needs the `SONAR_HOST_URL` and secured
-`SONAR_TOKEN` repository variables.
+SonarQube settings are in `sonar-project.properties` (project key `PUB`). The
+analysis needs the `SONAR_HOST_URL` repository variable and the `SONAR_TOKEN`
+repository secret, and is skipped when `SONAR_HOST_URL` is not set.
 
 ## Install
 

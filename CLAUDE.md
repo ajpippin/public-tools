@@ -56,7 +56,7 @@ All the tools share a shape: `main.rs` calls `cli::run()` and prints errors with
 
 ## CI and adding a tool
 
-`bitbucket-pipelines.yml` runs lint and coverage on every branch, and adds Trivy and SonarQube on `main`. The makefile discovers tools automatically through `*/Cargo.toml`, but CI does not: a new tool must also be added to the cache definitions and the `for tool in ...` check in `bitbucket-pipelines.yml`, and to the source, test, and LCOV paths in `sonar-project.properties`.
+`.github/workflows/ci.yml` (GitHub Actions) runs lint, coverage, Trivy, and SonarQube on every push to every branch. Jobs run on `ubuntu-latest` unless the `RUNS_ON` repository variable names other runners as JSON, and SonarQube is skipped when the `SONAR_HOST_URL` variable is unset. The makefile discovers tools automatically through `*/Cargo.toml`, but CI does not: a new tool must also be added to the target-directory cache paths and the `for tool in ...` check in `.github/workflows/ci.yml`, and to the source, test, and LCOV paths in `sonar-project.properties`.
 
 ## Project records
 
