@@ -97,6 +97,13 @@
 - Made `ytd list` extract the playlist from a YouTube URL's `list=` value.
 - Made `ytd get` download only the video from a video URL within a playlist.
 - Added `ytd get --transcript`, which saves a video's captions as plain text.
+- Made `ytd get --audio` save MP3 instead of the source format, such as Opus.
+- Added `ytd get --type`, which takes `mp4`, `mp3`, `txt`, or `all` and saves
+  any mix of the video, the audio, and the captions. Plain `ytd get` now saves
+  the video as MP4.
+- Made `ytd get --type mp4,mp3` download the video once and extract the MP3 from
+  it with ffmpeg, set by the new `ffmpeg_binary` setting.
+- Added `ytd get --video`, the same as `--type mp4`.
 
 ## Build system
 

@@ -8,23 +8,50 @@ struct Fixture {
     config: PathBuf,
 }
 
-// A fake yt-dlp that records its arguments and environment, writes FAKE_SRT as
-// a subtitle file under its --paths directory, and exits with FAKE_EXIT.
+// A fake yt-dlp that appends its arguments to a record of every run, records its
+// environment, writes FAKE_SRT as a subtitle file under its --paths directory
+// when it is fetching captions, and exits with FAKE_EXIT. Given --print-to-file,
+// it saves an empty video and lists it in that file.
+const YT_DLP: &str = r#"#!/bin/sh
+printf '%s\n' "$@" >> "$0.args"
+env > "$0.env"
+case " $* " in *' --skip-download '*) if [ -n "$FAKE_SRT" ]; then printf '%s' "$FAKE_SRT" > "$2/Title [id].en.srt"; fi;; esac
+previous=
+for arg; do
+  if [ "$previous" = after_move:filepath ]; then
+    mkdir -p "$2"
+    : > "$2/Title [id].mp4"
+    printf '%s\n' "$2/Title [id].mp4" >> "$arg"
+  fi
+  previous=$arg
+done
+exit "${FAKE_EXIT:-0}"
+"#;
+
+// A fake ffmpeg that records its arguments, writes an empty file at its last
+// argument, and exits with FAKE_FFMPEG_EXIT.
+const FFMPEG: &str = r#"#!/bin/sh
+printf '%s\n' "$@" > "$0.args"
+for arg; do last=$arg; done
+: > "$last"
+exit "${FAKE_FFMPEG_EXIT:-0}"
+"#;
+
 fn fixture() -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let binary = dir.path().join("yt-dlp");
-    std::fs::write(
-        &binary,
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.args\"\nenv > \"$0.env\"\nif [ -n \"$FAKE_SRT\" ]; then printf '%s' \"$FAKE_SRT\" > \"$2/Title [id].en.srt\"; fi\nexit \"${FAKE_EXIT:-0}\"\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let ffmpeg = dir.path().join("ffmpeg");
+    for (path, script) in [(&binary, YT_DLP), (&ffmpeg, FFMPEG)] {
+        std::fs::write(path, script).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     let config = dir.path().join("config.toml");
     std::fs::write(
         &config,
         format!(
-            "yt_dlp_binary = \"{}\"\ndownload_dir = \"/downloads\"\noutput_template = \"%(id)s\"\n",
-            binary.display()
+            "yt_dlp_binary = \"{}\"\nffmpeg_binary = \"{}\"\ndownload_dir = \"/downloads\"\noutput_template = \"%(id)s\"\n",
+            binary.display(),
+            ffmpeg.display()
         ),
     )
     .unwrap();
@@ -72,7 +99,7 @@ fn downloads_with_configured_settings() {
         .success();
     assert_eq!(
         fixture.recorded(),
-        "--paths\n/downloads\n--output\n%(id)s\n--no-playlist\n--\nhttps://example.com/a\n"
+        "--paths\n/downloads\n--output\n%(id)s\n--no-playlist\n--merge-output-format\nmp4\n--remux-video\nmp4\n--\nhttps://example.com/a\n"
     );
 }
 
@@ -94,7 +121,7 @@ fn passes_options_through() {
         .success();
     assert_eq!(
         fixture.recorded(),
-        "--paths\n/music\n--output\n%(id)s\n--no-playlist\n--extract-audio\n--no-mtime\n--\nu1\n"
+        "--paths\n/music\n--output\n%(id)s\n--no-playlist\n--extract-audio\n--audio-format\nmp3\n--no-mtime\n--\nu1\n"
     );
 }
 
@@ -275,7 +302,7 @@ fn expands_configured_alias() {
     fixture.run().args(["m", "u1"]).assert().success();
     assert_eq!(
         fixture.recorded(),
-        "--paths\n/music\n--output\n%(id)s\n--no-playlist\n--extract-audio\n--\nu1\n"
+        "--paths\n/music\n--output\n%(id)s\n--no-playlist\n--extract-audio\n--audio-format\nmp3\n--\nu1\n"
     );
 }
 
@@ -476,4 +503,86 @@ fn transcript_can_be_reached_through_an_alias() {
         .assert()
         .success();
     assert!(dir.join("Title [id].en.txt").exists());
+}
+
+#[test]
+fn type_all_extracts_the_audio_from_the_video() {
+    let fixture = fixture();
+    let dir = fixture.dir.path().join("out");
+    let video = dir.join("Title [id].mp4");
+    let audio = dir.join("Title [id].mp3");
+    let text = dir.join("Title [id].en.txt");
+    fixture
+        .run()
+        .env("FAKE_SRT", SRT)
+        .args(["get", "--type=all", "--dir"])
+        .arg(&dir)
+        .arg("u1")
+        .assert()
+        .success()
+        .stdout(format!("{}\n{}\n", audio.display(), text.display()));
+    assert!(video.exists() && audio.exists() && text.exists());
+    let recorded = fixture.recorded();
+    let runs: Vec<_> = recorded.split_inclusive("--\nu1\n").collect();
+    assert_eq!(runs.len(), 2);
+    assert!(runs[0].contains("--remux-video\nmp4\n--print-to-file\nafter_move:filepath\n"));
+    assert!(!recorded.contains("--extract-audio"));
+    assert!(runs[1].contains("--skip-download\n"));
+    assert_eq!(
+        std::fs::read_to_string(fixture.dir.path().join("ffmpeg.args")).unwrap(),
+        format!(
+            "-nostdin\n-loglevel\nerror\n-y\n-i\n{}\n-vn\n-codec:a\nlibmp3lame\n-q:a\n5\n{}\n",
+            video.display(),
+            audio.display()
+        )
+    );
+}
+
+#[test]
+fn audio_alone_is_still_downloaded_by_yt_dlp() {
+    let fixture = fixture();
+    fixture
+        .run()
+        .args(["get", "--type", "mp3", "u1"])
+        .assert()
+        .success();
+    assert!(fixture.recorded().contains("--extract-audio\n"));
+    assert!(!fixture.dir.path().join("ffmpeg.args").exists());
+}
+
+#[test]
+fn reports_ffmpeg_failure() {
+    let fixture = fixture();
+    fixture
+        .run()
+        .env("FAKE_FFMPEG_EXIT", "4")
+        .args(["get", "--type", "mp4,mp3", "--dir"])
+        .arg(fixture.dir.path().join("out"))
+        .arg("u1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("ffmpeg failed: exit status: 4"));
+}
+
+#[test]
+fn type_stops_at_the_first_failed_run() {
+    let fixture = fixture();
+    fixture
+        .run()
+        .env("FAKE_EXIT", "3")
+        .args(["get", "--type", "mp4,txt", "u1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("failed: exit status: 3"));
+    assert_eq!(fixture.recorded().matches("--\nu1\n").count(), 1);
+}
+
+#[test]
+fn lang_needs_a_transcript() {
+    fixture()
+        .run()
+        .args(["get", "--lang", "fr", "u1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--lang needs --type txt"));
 }
