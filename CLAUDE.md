@@ -35,7 +35,7 @@ All the tools share a shape: `main.rs` calls `cli::run()` and prints errors with
 
 ### Configuration
 
-- Lookup order is `--config`, then the tool's env var (`OLLAMA_SHELF_CONFIG`, `TEMPLATE_CONFIG`, `TOPIC_CONFIG`, `YTD_CONFIG`), then `~/.config/tools/<shelves|template|topic>.yaml`, or `$XDG_CONFIG_HOME/etc/ytd.toml` for `ytd`.
+- Lookup order is `--config`, then the tool's env var (`OLLAMA_SHELF_CONFIG`, `TEMPLATE_CONFIG`, `TOPIC_CONFIG`, `YTD_CONFIG`), then the first existing file of `$XDG_CONFIG_HOME/tools/<file>`, `~/.config/tools/<file>`, `$XDG_CONFIG_HOME/<file>`, and `~/.config/<file>`, where `<file>` is `shelves.yaml`, `template.yaml`, `topic.yaml`, or `ytd.toml`. With none existing, the first candidate is used. Each crate's `config::path_in` holds this order.
 - `config::ensure` creates a missing file on any normal run, and an existing file is never rewritten. `ytd` is the exception: it has no `ensure`, stops with an error and its help when the file is missing, and `ytd init` prints the starter text to stdout.
 - The generated file shows every default as a commented-out value. New settings must be added to that starter text as well as the structs; unit tests in `config.rs` check that the starter config stays in step with the defaults.
 
@@ -45,13 +45,13 @@ All the tools share a shape: `main.rs` calls `cli::run()` and prints errors with
 - `topic`: `edit` runs the editor, updates the footer, and commits and pushes through `git`. Encrypted topics go through the configured `gpg` binary.
 - `template`: `template/template.d/` holds the bundled templates, which are data files rather than code. `install` copies them to `~/.local/etc/templates.d` and keeps any local file whose contents differ.
 - `ollama-shelf`: shells out to the `ollama` binary and calls its HTTP API for benchmarks. Shelves are selected per host from the configuration file.
-- `ytd`: `get` and `list` each build a `yt-dlp` command from the configuration and the command line. URLs follow a `--` so that they can never be read as options. Like `topic`, it loads configuration ahead of argument parsing, because `expand_aliases` rewrites `argv` before clap parses it. `protect_video_ids` then turns video IDs that start with `-` into URLs, so that clap doesn't read them as options. `run` tries clap once first, so that `init`, `--help`, and `--version` work without a usable configuration. `get --transcript` has `yt-dlp` write SRT files to a temporary directory, then `transcript.rs` converts them to plain text in the download directory. The `[env]` table in `ytd.toml` sets default environment variables for `yt-dlp`, used only when a variable is not already set. CLI test fixtures for `ytd` must also remove `XDG_CONFIG_HOME`.
+- `ytd`: `get` and `list` each build a `yt-dlp` command from the configuration and the command line. URLs follow a `--` so that they can never be read as options. Like `topic`, it loads configuration ahead of argument parsing, because `expand_aliases` rewrites `argv` before clap parses it. `protect_video_ids` then turns video IDs that start with `-` into URLs, so that clap doesn't read them as options. `run` tries clap once first, so that `init`, `--help`, and `--version` work without a usable configuration. `get --transcript` has `yt-dlp` write SRT files to a temporary directory, then `transcript.rs` converts them to plain text in the download directory. The `[env]` table in `ytd.toml` sets default environment variables for `yt-dlp`, used only when a variable is not already set.
 - `template` and `topic` use a `build.rs` to embed the Git commit and Git version for `version.rs`, through tool-prefixed env vars. `ytd` uses a `build.rs` to embed the Git tag (or `dev`) and the 7-character commit SHA for `--version`. `ollama-shelf` has neither file.
 
 ## Testing conventions
 
 - Unit tests sit in `#[cfg(test)]` modules next to the code. CLI integration tests are in each crate's `tests/cli.rs`, using `assert_cmd`.
-- CLI tests must not touch the real `HOME`. Fixtures set `HOME` to a temp directory and remove the tool's env-var overrides; follow the existing fixture in that crate's `tests/cli.rs` when adding tests.
+- CLI tests must not touch the real `HOME`. Fixtures set `HOME` to a temp directory and remove the tool's env-var overrides and `XDG_CONFIG_HOME`; follow the existing fixture in that crate's `tests/cli.rs` when adding tests.
 - External programs are faked rather than required: a fake `ollama` on `PATH` and a stub HTTP server for `ollama-shelf`, a fake `gpg`, scripted editors, and a Git checkout with a bare origin for `topic`, and a fake `yt-dlp` that records its arguments for `ytd`.
 
 ## CI and adding a tool

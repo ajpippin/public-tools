@@ -1,9 +1,16 @@
 # topic
 
 A Rust personal topic-library tool. Topics are four-digit `.txt` or `.md`
-files, optionally encrypted with GPG. Configuration defaults to
-`~/.config/tools/topic.yaml`; `TOPIC_CONFIG`, `--config`, and `--dir` provide
-overrides.
+files, optionally encrypted with GPG. `TOPIC_CONFIG`, `--config`, and `--dir`
+provide overrides. Without an override, the configuration is the first of these that exists:
+
+1. `$XDG_CONFIG_HOME/tools/topic.yaml`
+2. `~/.config/tools/topic.yaml`
+3. `$XDG_CONFIG_HOME/topic.yaml`
+4. `~/.config/topic.yaml`
+
+`XDG_CONFIG_HOME` is skipped when it is unset, empty, or relative.
+When none exists, the first is used.
 
 When this file is missing, `topic` creates it automatically with every setting
 shown as a commented-out default. Existing files are never rewritten during

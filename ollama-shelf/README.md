@@ -19,9 +19,16 @@ command line:
 BINDIR=/some/other/bin make -f .makefile install
 ```
 
-The default configuration is `~/.config/tools/shelves.yaml`.
-`OLLAMA_SHELF_CONFIG` overrides that path, and `--config` takes precedence over
-both. `OLLAMA_HOST_URL` and
+Without an override, the configuration is the first of these that exists:
+
+1. `$XDG_CONFIG_HOME/tools/shelves.yaml`
+2. `~/.config/tools/shelves.yaml`
+3. `$XDG_CONFIG_HOME/shelves.yaml`
+4. `~/.config/shelves.yaml`
+
+`XDG_CONFIG_HOME` is skipped when it is unset, empty, or relative.
+When none exists, the first is created. `OLLAMA_SHELF_CONFIG` overrides the
+lookup, and `--config` takes precedence over both. `OLLAMA_HOST_URL` and
 `OLLAMA_MODELS` override their corresponding YAML values.
 
 If the file is missing, `ollama-shelf` creates it automatically with every

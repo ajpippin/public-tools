@@ -153,7 +153,7 @@ fn reports_missing_binary() {
 #[test]
 fn missing_config_aborts_with_help() {
     let dir = tempfile::tempdir().unwrap();
-    let config = dir.path().join(".config/etc/ytd.toml");
+    let config = dir.path().join(".config/tools/ytd.toml");
     ytd(dir.path())
         .args(["get", "u1"])
         .assert()
@@ -270,8 +270,8 @@ fn environment_overrides_env_defaults() {
 fn honors_xdg_config_home() {
     let fixture = fixture();
     let xdg = fixture.dir.path().join("xdg");
-    std::fs::create_dir_all(xdg.join("etc")).unwrap();
-    std::fs::rename(&fixture.config, xdg.join("etc/ytd.toml")).unwrap();
+    std::fs::create_dir_all(xdg.join("tools")).unwrap();
+    std::fs::rename(&fixture.config, xdg.join("tools/ytd.toml")).unwrap();
     ytd(fixture.dir.path())
         .env("XDG_CONFIG_HOME", &xdg)
         .args(["get", "u1"])
@@ -342,7 +342,7 @@ fn init_prints_default_config_without_creating_it() {
 fn init_output_is_a_usable_config() {
     let dir = tempfile::tempdir().unwrap();
     let output = ytd(dir.path()).arg("init").output().unwrap();
-    let config = dir.path().join(".config/etc/ytd.toml");
+    let config = dir.path().join(".config/tools/ytd.toml");
     std::fs::create_dir_all(config.parent().unwrap()).unwrap();
     std::fs::write(config, output.stdout).unwrap();
     ytd(dir.path())

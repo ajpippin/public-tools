@@ -101,6 +101,12 @@
   it with ffmpeg, set by the new `ffmpeg_binary` setting.
 - Added `ytd get --video`, the same as `--type mp4`.
 
+## Configuration lookup
+
+- Made every tool look for its configuration in `$XDG_CONFIG_HOME/tools`,
+  `~/.config/tools`, `$XDG_CONFIG_HOME`, then `~/.config`, using the first file
+  that exists. `ytd` moved from `$XDG_CONFIG_HOME/etc/ytd.toml` to this order.
+
 ## Build system
 
 - Renamed the top-level `.makefile` to `Makefile`, so `make` works without `-f`.

@@ -33,8 +33,16 @@ Template installation never overwrites an existing file with different
 contents. Modified templates are retained and reported as warnings while all
 other missing templates continue to install.
 
-Configuration defaults to `~/.config/tools/template.yaml`. `TEMPLATE_CONFIG`
-and `--config` override it. Run
+Without an override, the configuration is the first of these that exists:
+
+1. `$XDG_CONFIG_HOME/tools/template.yaml`
+2. `~/.config/tools/template.yaml`
+3. `$XDG_CONFIG_HOME/template.yaml`
+4. `~/.config/template.yaml`
+
+`XDG_CONFIG_HOME` is skipped when it is unset, empty, or relative.
+When none exists, the first is used. `TEMPLATE_CONFIG` and `--config` override
+the lookup. Run
 `template init` to create a starter configuration; `TEMPLATE_DIR` remains
 supported as an additional path list when no configuration file exists.
 The file is also created automatically when missing, with every setting shown

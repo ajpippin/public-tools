@@ -94,7 +94,8 @@ impl Fixture {
             .env("HOME", self.dir.path())
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env_remove("TEMPLATE_CONFIG")
-            .env_remove("TEMPLATE_DIR");
+            .env_remove("TEMPLATE_DIR")
+            .env_remove("XDG_CONFIG_HOME");
         command
     }
 
